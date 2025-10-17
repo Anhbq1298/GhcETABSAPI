@@ -73,6 +73,16 @@ namespace GhcETABSAPI.Properties {
         /// <summary>
         ///   Looks up a localized resource of type System.Drawing.Bitmap.
         /// </summary>
+        internal static System.Drawing.Bitmap addFramesToGroupIcon {
+            get {
+                object obj = ResourceManager.GetObject("addFramesToGroupIcon", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized resource of type System.Drawing.Bitmap.
+        /// </summary>
         internal static System.Drawing.Bitmap addShellIcon {
             get {
                 object obj = ResourceManager.GetObject("addShellIcon", resourceCulture);
