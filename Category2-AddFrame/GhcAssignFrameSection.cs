@@ -11,15 +11,16 @@
 //   1) sapModel    (ETABSv1.cSapModel, item)  ETABS model from Attach component.
 //   2) frameNames  (string, list)   ETABS frame object names to update.
 //   3) sectionNames(string, list)   Section property names. Provide one item to broadcast
-//                                   to all frames, or supply 1:1 list matching frameNames.
-//   4) itemType    (int, item)      Optional ETABS eItemType value (default = Objects = 0).
+//                                   to all frames, or supply a list; if it runs short, the
+//                                   last valid section is assumed for remaining frames.
 //
 // Outputs:
 //   0) msg         (string, item)   Summary / status message.
 //
 // Behavior Notes:
 //   + Rising-edge execution only (stores last trigger/message per component instance).
-//   + Requires sectionNames to contain either 1 item (broadcast) or match frameNames count.
+//   + sectionNames may contain 1 item (broadcast) or run shorter than frameNames; in the
+//     latter case the last valid section provided is reused for remaining assignments.
 //   + Blank / whitespace frame names are ignored (do not count toward total attempts).
 // -------------------------------------------------------------
 
@@ -62,14 +63,8 @@ namespace GhcETABSAPI
             p.AddTextParameter(
                 "sectionNames",
                 "sectionNames",
-                "Section property names. Provide 1 item to broadcast or 1:1 list matching frameNames.",
+                "Section property names. Provide 1 item to broadcast or a list; if it is shorter than frameNames the last valid section is reused.",
                 GH_ParamAccess.list);
-            p.AddIntegerParameter(
-                "itemType",
-                "itemType",
-                "Optional ETABS eItemType value (0 = Objects, 1 = Group, etc.).",
-                GH_ParamAccess.item,
-                (int)eItemType.Objects);
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager p)
@@ -83,13 +78,11 @@ namespace GhcETABSAPI
             cSapModel sapModel = null;
             List<string> frameNames = new List<string>();
             List<string> sectionNames = new List<string>();
-            int rawItemType = (int)eItemType.Objects;
 
             if (!da.GetData(0, ref add)) add = false;
             if (!da.GetData(1, ref sapModel)) sapModel = null;
             da.GetDataList(2, frameNames);
             da.GetDataList(3, sectionNames);
-            da.GetData(4, ref rawItemType);
 
             if (!(_lastAdd == false && add == true))
             {
@@ -106,19 +99,12 @@ namespace GhcETABSAPI
                 if (frameNames == null || frameNames.Count == 0) throw new Exception("frameNames list is empty.");
                 if (sectionNames == null || sectionNames.Count == 0) throw new Exception("sectionNames list is empty.");
 
-                bool broadcast = sectionNames.Count == 1;
-                if (!broadcast && sectionNames.Count != frameNames.Count)
-                {
-                    throw new Exception("sectionNames must have 1 item or match frameNames count.");
-                }
-
-                eItemType itemType = Enum.IsDefined(typeof(eItemType), rawItemType)
-                    ? (eItemType)rawItemType
-                    : eItemType.Objects;
-
                 int totalAttempts = 0;
                 int success = 0;
                 int failures = 0;
+                bool reusedSectionForRemaining = false;
+                bool broadcast = sectionNames.Count == 1;
+                string lastValidSection = null;
 
                 for (int i = 0; i < frameNames.Count; i++)
                 {
@@ -128,14 +114,34 @@ namespace GhcETABSAPI
                         continue;
                     }
 
-                    string section = broadcast ? sectionNames[0] : sectionNames[i];
+                    string section;
+                    if (broadcast)
+                    {
+                        section = sectionNames[0];
+                    }
+                    else if (i < sectionNames.Count)
+                    {
+                        section = sectionNames[i];
+                    }
+                    else
+                    {
+                        section = lastValidSection ?? (sectionNames.Count > 0 ? sectionNames[sectionNames.Count - 1] : null);
+                        if (!string.IsNullOrWhiteSpace(section))
+                        {
+                            reusedSectionForRemaining = true;
+                        }
+                    }
+
                     if (string.IsNullOrWhiteSpace(section))
                     {
                         continue;
                     }
 
+                    section = section.Trim();
+                    lastValidSection = section;
+
                     totalAttempts++;
-                    int ret = sapModel.FrameObj.SetSection(frame.Trim(), section.Trim(), itemType);
+                    int ret = sapModel.FrameObj.SetSection(frame.Trim(), section, eItemType.Objects);
                     if (ret == 0)
                     {
                         success++;
@@ -152,13 +158,21 @@ namespace GhcETABSAPI
                 }
                 else
                 {
-                    string suffix = broadcast ? $" (section '{sectionNames[0].Trim()}')" : string.Empty;
+                    string suffix = broadcast && !string.IsNullOrWhiteSpace(sectionNames[0])
+                        ? $" (section '{sectionNames[0].Trim()}')"
+                        : string.Empty;
                     _lastMsg = $"{success}/{totalAttempts} frame sections assigned{suffix}.";
                     if (failures > 0)
                     {
                         _lastMsg += $" {failures} failure(s).";
                     }
+                    if (reusedSectionForRemaining)
+                    {
+                        _lastMsg += " Section list shorter than assignments; last valid section reused for remaining frames.";
+                    }
                 }
+                // Refresh ETABS view
+                try { sapModel.View.RefreshView(0, false); } catch { }
 
                 notification = _lastMsg;
             }
