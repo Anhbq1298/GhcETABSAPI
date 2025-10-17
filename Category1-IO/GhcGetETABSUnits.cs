@@ -24,7 +24,7 @@ namespace GhcETABSAPI
                  "01. IO" // Subcategory (panel)
                 )
         { }
-
+        private string testGit = "1";
         public override Guid ComponentGuid => new Guid("a6f0d0b2-6f3f-4e6c-9db0-9f9f2b0a6e21");
 
         protected override Bitmap Icon
