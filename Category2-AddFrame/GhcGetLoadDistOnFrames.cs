@@ -13,7 +13,7 @@
 //   3) loadPattern (string, list)  OPTIONAL filters. If UNCONNECTED or empty → treated as null (no filter).
 //
 // Outputs:
-//   0) header  (text, tree)   Single branch of column labels.
+//   0) headers (text, tree)   Single branch of column labels.
 //   1) values  (generic, tree) Column-wise branches (0..10) aligned to header order.
 //   2) msg     (text, item)   Status / diagnostics.
 //
@@ -96,7 +96,7 @@ namespace GhcETABSAPI
 
         protected override void RegisterOutputParams(GH_OutputParamManager p)
         {
-            p.AddTextParameter("header", "header", "Header labels describing each value column.", GH_ParamAccess.tree);
+            p.AddTextParameter("headers", "headers", "Header labels describing each value column.", GH_ParamAccess.tree);
             p.AddGenericParameter("values", "values", "Distributed load rows. Each branch matches the header order.", GH_ParamAccess.tree);
             p.AddTextParameter("msg", "msg", "Status / diagnostic message.", GH_ParamAccess.item);
         }
