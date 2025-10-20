@@ -76,9 +76,6 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
   </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Category0-Utility\" />
-  </ItemGroup>
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
     <Exec Command=":: DEST&#xD;&#xA;set &quot;GH_LIB=C:\Users\NCPC\AppData\Roaming\Grasshopper\Libraries&quot;&#xD;&#xA;if not exist &quot;%25GH_LIB%25&quot; mkdir &quot;%25GH_LIB%25&quot;&#xD;&#xA;&#xD;&#xA;:: Copy your plugin as .gha&#xD;&#xA;copy /y &quot;$(TargetPath)&quot; &quot;%25GH_LIB%25\$(TargetName).gha&quot;&#xD;&#xA;&#xD;&#xA;:: Copy ETABS interop(s) if present in the build output&#xD;&#xA;for %25%25F in (ETABSv1.dll Interop.ETABSv1.dll AxInterop.ETABSv1.dll) do (&#xD;&#xA;  if exist &quot;$(TargetDir)%25%25F&quot; copy /y &quot;$(TargetDir)%25%25F&quot; &quot;%25GH_LIB%25&quot;&#xD;&#xA;)" />
   </Target>
