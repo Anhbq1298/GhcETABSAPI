@@ -54,6 +54,11 @@ namespace GhcETABSAPI
                 "frameNames",
                 "Frame object names to query. Blank entries are ignored. If empty, returns zero results.",
                 GH_ParamAccess.list);
+            p.AddTextParameter(
+                "loadPattern",
+                "loadPattern",
+                "Optional load pattern filters. Leave empty to return all load patterns.",
+                GH_ParamAccess.list);
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager p)
@@ -68,10 +73,12 @@ namespace GhcETABSAPI
             bool run = false;
             cSapModel sapModel = null;
             List<string> frameNames = new List<string>();
+            List<string> loadPatternFilters = new List<string>();
 
             da.GetData(0, ref run);
             da.GetData(1, ref sapModel);
             da.GetDataList(2, frameNames);
+            da.GetDataList(3, loadPatternFilters);
 
             bool rising = !lastRun && run;
 
@@ -114,7 +121,30 @@ namespace GhcETABSAPI
                     }
                 }
 
-                var result = GetFrameDistributed(sapModel, trimmed);
+                var rawResult = GetFrameDistributed(sapModel, trimmed);
+
+                List<string> trimmedFilters = new List<string>();
+                if (loadPatternFilters != null)
+                {
+                    HashSet<string> filterSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    for (int i = 0; i < loadPatternFilters.Count; i++)
+                    {
+                        string lp = loadPatternFilters[i];
+                        if (string.IsNullOrWhiteSpace(lp))
+                        {
+                            continue;
+                        }
+
+                        string cleanFilter = lp.Trim();
+                        if (filterSet.Add(cleanFilter))
+                        {
+                            trimmedFilters.Add(cleanFilter);
+                        }
+                    }
+                }
+
+                bool hasFilters = trimmedFilters.Count > 0;
+                var result = FilterByLoadPattern(rawResult, trimmedFilters);
 
                 GH_Structure<GH_String> headerTree = BuildHeaderTree();
                 GH_Structure<GH_ObjectWrapper> valueTree = BuildValueTree(result);
@@ -123,6 +153,38 @@ namespace GhcETABSAPI
                 if (trimmed.Count == 0)
                 {
                     status = "No valid frame names provided.";
+                }
+                else if (hasFilters)
+                {
+                    string patternSummary = FormatLoadPatternSummary(trimmedFilters);
+
+                    if (result.total == 0)
+                    {
+                        if (rawResult.total > 0)
+                        {
+                            status = $"No distributed loads matched {patternSummary}.";
+                            if (result.failCount > 0)
+                            {
+                                status += $" {result.failCount} frame calls failed.";
+                            }
+                        }
+                        else if (result.failCount > 0)
+                        {
+                            status = $"No loads returned. {result.failCount} frame calls failed.";
+                        }
+                        else
+                        {
+                            status = "No distributed loads on the requested frames.";
+                        }
+                    }
+                    else
+                    {
+                        status = $"Returned {result.total} distributed loads for {patternSummary}.";
+                        if (result.failCount > 0)
+                        {
+                            status += $" {result.failCount} frame calls failed.";
+                        }
+                    }
                 }
                 else if (result.total == 0 && result.failCount > 0)
                 {
@@ -261,24 +323,119 @@ namespace GhcETABSAPI
             GH_Structure<GH_ObjectWrapper> tree = new GH_Structure<GH_ObjectWrapper>();
 
             int rowCount = result.frameName.Count;
-            for (int i = 0; i < rowCount; i++)
-            {
-                GH_Path path = new GH_Path(i);
 
-                tree.Append(new GH_ObjectWrapper(result.frameName[i]), path);
-                tree.Append(new GH_ObjectWrapper(result.loadPat[i]), path);
-                tree.Append(new GH_ObjectWrapper(result.myType[i]), path);
-                tree.Append(new GH_ObjectWrapper(result.cSys[i]), path);
-                tree.Append(new GH_ObjectWrapper(result.dir[i]), path);
-                tree.Append(new GH_ObjectWrapper(result.rd1[i]), path);
-                tree.Append(new GH_ObjectWrapper(result.rd2[i]), path);
-                tree.Append(new GH_ObjectWrapper(result.dist1[i]), path);
-                tree.Append(new GH_ObjectWrapper(result.dist2[i]), path);
-                tree.Append(new GH_ObjectWrapper(result.val1[i]), path);
-                tree.Append(new GH_ObjectWrapper(result.val2[i]), path);
+            for (int col = 0; col < HeaderLabels.Length; col++)
+            {
+                GH_Path path = new GH_Path(col);
+                tree.EnsurePath(path);
+
+                for (int row = 0; row < rowCount; row++)
+                {
+                    tree.Append(new GH_ObjectWrapper(GetValueByColumn(result, col, row)), path);
+                }
             }
 
             return tree;
+        }
+
+        private static object GetValueByColumn((int total, int failCount, List<string> frameName, List<string> loadPat, List<int> myType,
+            List<string> cSys, List<int> dir, List<double> rd1, List<double> rd2, List<double> dist1, List<double> dist2, List<double> val1,
+            List<double> val2) result, int columnIndex, int rowIndex)
+        {
+            switch (columnIndex)
+            {
+                case 0:
+                    return result.frameName[rowIndex];
+                case 1:
+                    return result.loadPat[rowIndex];
+                case 2:
+                    return result.myType[rowIndex];
+                case 3:
+                    return result.cSys[rowIndex];
+                case 4:
+                    return result.dir[rowIndex];
+                case 5:
+                    return result.rd1[rowIndex];
+                case 6:
+                    return result.rd2[rowIndex];
+                case 7:
+                    return result.dist1[rowIndex];
+                case 8:
+                    return result.dist2[rowIndex];
+                case 9:
+                    return result.val1[rowIndex];
+                case 10:
+                    return result.val2[rowIndex];
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(columnIndex));
+            }
+        }
+
+        private static (int total, int failCount, List<string> frameName, List<string> loadPat, List<int> myType, List<string> cSys,
+            List<int> dir, List<double> rd1, List<double> rd2, List<double> dist1, List<double> dist2, List<double> val1, List<double>
+                val2) FilterByLoadPattern(
+            (int total, int failCount, List<string> frameName, List<string> loadPat, List<int> myType, List<string> cSys, List<int>
+                dir, List<double> rd1, List<double> rd2, List<double> dist1, List<double> dist2, List<double> val1, List<double> val2)
+                result,
+            IReadOnlyCollection<string> loadPatternFilters)
+        {
+            if (loadPatternFilters == null || loadPatternFilters.Count == 0)
+            {
+                return result;
+            }
+
+            var comparer = StringComparer.OrdinalIgnoreCase;
+            HashSet<string> filterSet = new HashSet<string>(loadPatternFilters, comparer);
+
+            var frameNameOut = new List<string>();
+            var loadPatOut = new List<string>();
+            var myTypeOut = new List<int>();
+            var cSysOut = new List<string>();
+            var dirOut = new List<int>();
+            var rd1Out = new List<double>();
+            var rd2Out = new List<double>();
+            var dist1Out = new List<double>();
+            var dist2Out = new List<double>();
+            var val1Out = new List<double>();
+            var val2Out = new List<double>();
+
+            for (int i = 0; i < result.frameName.Count; i++)
+            {
+                if (!filterSet.Contains(result.loadPat[i]))
+                {
+                    continue;
+                }
+
+                frameNameOut.Add(result.frameName[i]);
+                loadPatOut.Add(result.loadPat[i]);
+                myTypeOut.Add(result.myType[i]);
+                cSysOut.Add(result.cSys[i]);
+                dirOut.Add(result.dir[i]);
+                rd1Out.Add(result.rd1[i]);
+                rd2Out.Add(result.rd2[i]);
+                dist1Out.Add(result.dist1[i]);
+                dist2Out.Add(result.dist2[i]);
+                val1Out.Add(result.val1[i]);
+                val2Out.Add(result.val2[i]);
+            }
+
+            return (frameNameOut.Count, result.failCount, frameNameOut, loadPatOut, myTypeOut, cSysOut, dirOut, rd1Out, rd2Out,
+                dist1Out, dist2Out, val1Out, val2Out);
+        }
+
+        private static string FormatLoadPatternSummary(IReadOnlyList<string> filters)
+        {
+            if (filters == null || filters.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            if (filters.Count == 1)
+            {
+                return $"load pattern \"{filters[0]}\"";
+            }
+
+            return $"load patterns ({string.Join(", ", filters)})";
         }
 
         private void UpdateAndPushOutputs(IGH_DataAccess da, GH_Structure<GH_String> headerTree, GH_Structure<GH_ObjectWrapper> valueTree,
