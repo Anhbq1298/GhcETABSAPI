@@ -76,84 +76,55 @@ namespace GhcETABSAPI
                 string path = ProjectRelative(filePathOrRelative);
                 if (string.IsNullOrWhiteSpace(path)) return false;
 
-                // 1) Attach to running Excel via VB Interaction (no P/Invoke, C# 7.3 friendly)
-                try { app = Interaction.GetObject(null, "Excel.Application") as Excel.Application; }
-                catch { app = null; }
+                string fullPath = Path.GetFullPath(path);
 
-                // 2) Create application if none
-                if (app == null)
+                // 1) Try bind to an *already-open* workbook by FILE (no Excel option changes)
+                try
+                {
+                    if (File.Exists(fullPath))
+                    {
+                        var obj = Interaction.GetObject(fullPath);    // attaches if that workbook is open
+                        wb = obj as Excel.Workbook;                   // OR starts Excel & opens file if not already open
+                        if (wb != null) app = wb.Application;
+                    }
+                }
+                catch
+                {
+                    wb = null; app = null; // ignore and fall through
+                }
+
+                // 2) If not bound, create our own Excel and open / create workbook
+                if (wb == null || app == null)
                 {
                     app = new Excel.Application();
                     createdApplication = true;
-                }
 
-                // Honor visibility (even on attach)
-                try
-                {
-                    app.Visible = visible;
-                    if (visible)
+                    try
                     {
-                        app.UserControl = true;
-                        try { app.WindowState = Excel.XlWindowState.xlMaximized; } catch { }
+                        app.Visible = visible;
+                        if (visible) app.UserControl = true;
                     }
-                }
-                catch { }
+                    catch { }
 
-                // 3) If workbook already open in this app, bind to it
-                try
-                {
-                    string fullPath = Path.GetFullPath(path);
-                    string fileName = Path.GetFileName(fullPath);
-
-                    int count = app.Workbooks.Count;
-                    for (int i = 1; i <= count; i++)
+                    if (File.Exists(fullPath))
                     {
-                        Excel.Workbook w = null;
-                        try { w = app.Workbooks[i]; } catch { }
-                        if (w == null) continue;
-
-                        bool same = false;
-                        try
-                        {
-                            string wFull = null;
-                            try { wFull = Path.GetFullPath(w.FullName); } catch { }
-                            if (!string.IsNullOrEmpty(wFull))
-                                same = string.Equals(wFull, fullPath, StringComparison.OrdinalIgnoreCase);
-                            else
-                                same = string.Equals(w.Name, fileName, StringComparison.OrdinalIgnoreCase);
-                        }
-                        catch { }
-
-                        if (same)
-                        {
-                            wb = w;
-                            break;
-                        }
-                    }
-                }
-                catch { }
-
-                // 4) Open or create the workbook
-                if (wb == null)
-                {
-                    if (File.Exists(path))
-                    {
-                        wb = app.Workbooks.Open(path, ReadOnly: readOnly);
+                        wb = app.Workbooks.Open(fullPath, ReadOnly: readOnly);
                     }
                     else
                     {
-                        string dir = Path.GetDirectoryName(path);
+                        string dir = Path.GetDirectoryName(fullPath);
                         if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
                         {
                             try { Directory.CreateDirectory(dir); } catch { }
                         }
 
                         wb = app.Workbooks.Add();
-                        try { wb.SaveAs(path, Excel.XlFileFormat.xlOpenXMLWorkbook); } catch { }
+                        try { wb.SaveAs(fullPath, Excel.XlFileFormat.xlOpenXMLWorkbook); } catch { }
                     }
                 }
 
-                // 5) Activate before returning
+                // 3) Finish
+                try { if (visible) app.Visible = true; } catch { }
                 try { wb.Activate(); } catch { }
 
                 return createdApplication;
