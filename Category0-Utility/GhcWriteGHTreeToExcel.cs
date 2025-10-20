@@ -15,6 +15,7 @@
 //   5) visible        (bool, item) Show Excel application window. Default true.
 //   6) saveAfterWrite (bool, item) Save workbook after writing (ignored when readOnly). Default true.
 //   7) readOnly       (bool, item) Open workbook read-only. Default false.
+//   8) headers        (string, list) Optional column headers applied in list order when provided.
 //
 // OUTPUTS:
 //   0) msg            (string, item) Status message (replayed while idle).
@@ -74,6 +75,11 @@ namespace GhcETABSAPI
             p.AddBooleanParameter("visible", "visible", "Show Excel window after attaching/opening.", GH_ParamAccess.item, true);
             p.AddBooleanParameter("saveAfterWrite", "save", "Save workbook after writing (ignored if read-only).", GH_ParamAccess.item, true);
             p.AddBooleanParameter("readOnly", "readOnly", "Open workbook in read-only mode.", GH_ParamAccess.item, false);
+            p.AddTextParameter(
+                "headers",
+                "headers",
+                "Optional list of header labels. When supplied, entries are applied to columns in list order.",
+                GH_ParamAccess.list);
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager p)
@@ -101,6 +107,7 @@ namespace GhcETABSAPI
             bool visible = true;
             bool saveAfterWrite = true;
             bool readOnly = false;
+            List<string> headerOverrides = new List<string>();
 
             da.GetDataTree(1, out tree);
             da.GetData(2, ref workbookPath);
@@ -109,6 +116,7 @@ namespace GhcETABSAPI
             da.GetData(5, ref visible);
             da.GetData(6, ref saveAfterWrite);
             da.GetData(7, ref readOnly);
+            da.GetDataList(8, headerOverrides);
 
             Excel.Application app;
             Excel.Workbook wb;
@@ -135,7 +143,7 @@ namespace GhcETABSAPI
                 return;
             }
 
-            Dictionary<string, List<object>> dictionary = ConvertTreeToDictionary(tree, out List<string> headers);
+            Dictionary<string, List<object>> dictionary = ConvertTreeToDictionary(tree, headerOverrides, out List<string> headers);
             if (dictionary.Count == 0)
             {
                 message = "Tree is empty.";
@@ -160,11 +168,16 @@ namespace GhcETABSAPI
             Finish(da, add, message);
         }
 
-        private static Dictionary<string, List<object>> ConvertTreeToDictionary(GH_Structure<IGH_Goo> tree, out List<string> headers)
+        private static Dictionary<string, List<object>> ConvertTreeToDictionary(
+            GH_Structure<IGH_Goo> tree,
+            IList<string> headerOverrides,
+            out List<string> headers)
         {
             headers = new List<string>();
             Dictionary<string, List<object>> dict = new Dictionary<string, List<object>>();
             if (tree == null) return dict;
+
+            List<(string key, List<object> values)> orderedColumns = new List<(string, List<object>)>();
 
             foreach (GH_Path path in tree.Paths)
             {
@@ -180,11 +193,41 @@ namespace GhcETABSAPI
                 }
 
                 string key = path.ToString();
-                dict[key] = list;
-                headers.Add(key);
+                orderedColumns.Add((key, list));
+            }
+
+            HashSet<string> usedHeaders = new HashSet<string>(StringComparer.Ordinal);
+
+            for (int i = 0; i < orderedColumns.Count; i++)
+            {
+                var column = orderedColumns[i];
+                string desiredHeader = (headerOverrides != null && i < headerOverrides.Count) ? headerOverrides[i] : null;
+                string resolvedHeader = ResolveHeader(desiredHeader, column.key, usedHeaders);
+
+                headers.Add(resolvedHeader);
+                dict[resolvedHeader] = column.values;
             }
 
             return dict;
+        }
+
+        private static string ResolveHeader(string desired, string fallback, HashSet<string> used)
+        {
+            string baseHeader = string.IsNullOrWhiteSpace(desired) ? fallback : desired.Trim();
+            if (string.IsNullOrEmpty(baseHeader))
+            {
+                baseHeader = "Column";
+            }
+
+            string candidate = baseHeader;
+            int suffix = 1;
+            while (used.Contains(candidate))
+            {
+                candidate = string.Format(CultureInfo.InvariantCulture, "{0}_{1}", baseHeader, suffix++);
+            }
+
+            used.Add(candidate);
+            return candidate;
         }
 
         private static object GooToExcelValue(IGH_Goo goo)
