@@ -12,8 +12,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "dlls", "dlls", "{02EA681E-C
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "rss", "rss", "{04E171C5-853F-42D7-886B-0A71443B5638}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExcelHelpers", "..\ExcelHelpers\ExcelHelpers.csproj", "{741E9F9D-0A37-44D2-AEF8-3B761C5B23ED}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,10 +22,6 @@ Global
 		{9DD8369A-835A-4918-9F3F-F010800ADC0A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9DD8369A-835A-4918-9F3F-F010800ADC0A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{9DD8369A-835A-4918-9F3F-F010800ADC0A}.Release|Any CPU.Build.0 = Release|Any CPU
-		{741E9F9D-0A37-44D2-AEF8-3B761C5B23ED}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{741E9F9D-0A37-44D2-AEF8-3B761C5B23ED}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{741E9F9D-0A37-44D2-AEF8-3B761C5B23ED}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{741E9F9D-0A37-44D2-AEF8-3B761C5B23ED}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
