@@ -13,7 +13,7 @@
 //   3) loadPattern (string, list)  OPTIONAL filters. If UNCONNECTED or empty → treated as null (no filter).
 //
 // Outputs:
-//   0) header  (text, tree)   Single branch of column labels.
+//   0) headers (text, tree)   Single branch of column labels.
 //   1) values  (generic, tree) Column-wise branches (0..10) aligned to header order.
 //   2) msg     (text, item)   Status / diagnostics.
 //
@@ -32,6 +32,7 @@ using System;
 using System.Collections.Generic;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
+using Grasshopper.Kernel.Parameters;
 using Grasshopper.Kernel.Types;
 using ETABSv1;
 
@@ -77,7 +78,7 @@ namespace GhcETABSAPI
 
         protected override void RegisterInputParams(GH_InputParamManager p)
         {
-            p.AddBooleanParameter("run", "run", "Press to query (rising edge trigger).", GH_ParamAccess.item, false);
+            AddRunTriggerParameter(p);
             p.AddGenericParameter("sapModel", "sapModel", "ETABS cSapModel from the Attach component.", GH_ParamAccess.item);
             p.AddTextParameter(
                 "frameNames",
@@ -96,7 +97,7 @@ namespace GhcETABSAPI
 
         protected override void RegisterOutputParams(GH_OutputParamManager p)
         {
-            p.AddTextParameter("header", "header", "Header labels describing each value column.", GH_ParamAccess.tree);
+            p.AddTextParameter("headers", "headers", "Header labels describing each value column.", GH_ParamAccess.tree);
             p.AddGenericParameter("values", "values", "Distributed load rows. Each branch matches the header order.", GH_ParamAccess.tree);
             p.AddTextParameter("msg", "msg", "Status / diagnostic message.", GH_ParamAccess.item);
         }
@@ -229,6 +230,21 @@ namespace GhcETABSAPI
         }
 
         // ----------------------- helpers -----------------------
+
+        private static void AddRunTriggerParameter(GH_InputParamManager paramManager)
+        {
+            int runIndex = paramManager.AddBooleanParameter(
+                "run",
+                "run",
+                "Press to query (rising edge trigger).",
+                GH_ParamAccess.item,
+                false);
+
+            if (runIndex >= 0 && paramManager[runIndex] is Param_Boolean runParam)
+            {
+                runParam.Optional = true;
+            }
+        }
 
         private static (int total, int failCount, List<string> frameName, List<string> loadPat, List<int> myType, List<string> cSys, List<int> dir,
             List<double> rd1, List<double> rd2, List<double> dist1, List<double> dist2, List<double> val1, List<double> val2)
