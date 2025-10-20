@@ -1,12 +1,36 @@
 using System;
 using System.Collections.Generic;
 using Grasshopper.Kernel;
+using Grasshopper.Kernel.Data;
+using Grasshopper.Kernel.Types;
 using ETABSv1;
 
 namespace GhcETABSAPI
 {
     public class GhcGetLoadDistOnFrames : GH_Component
     {
+        private const string IdleMessage = "Idle.";
+
+        private static readonly string[] HeaderLabels =
+        {
+            "FrameName",
+            "LoadPattern",
+            "Type",
+            "CoordinateSystem",
+            "Direction",
+            "RelDist1",
+            "RelDist2",
+            "Dist1",
+            "Dist2",
+            "Value1",
+            "Value2"
+        };
+
+        private bool lastRun;
+        private GH_Structure<GH_String> lastHeaderTree = BuildHeaderTree();
+        private GH_Structure<GH_ObjectWrapper> lastValueTree = new GH_Structure<GH_ObjectWrapper>();
+        private string lastMessage = IdleMessage;
+
         public GhcGetLoadDistOnFrames()
           : base(
                 "Get Frame Distributed Loads",
@@ -23,6 +47,7 @@ namespace GhcETABSAPI
 
         protected override void RegisterInputParams(GH_InputParamManager p)
         {
+            p.AddBooleanParameter("run", "run", "Press to query (rising edge trigger).", GH_ParamAccess.item, false);
             p.AddGenericParameter("sapModel", "sapModel", "ETABS cSapModel from the Attach component.", GH_ParamAccess.item);
             p.AddTextParameter(
                 "frameNames",
@@ -33,53 +58,66 @@ namespace GhcETABSAPI
 
         protected override void RegisterOutputParams(GH_OutputParamManager p)
         {
-            p.AddIntegerParameter("count", "count", "Number of distributed load assignments returned.", GH_ParamAccess.item);
-            p.AddTextParameter("frameName", "frameName", "Frame object name for each distributed load.", GH_ParamAccess.list);
-            p.AddTextParameter("loadPattern", "loadPattern", "Load pattern name.", GH_ParamAccess.list);
-            p.AddIntegerParameter("type", "type", "Distributed load type (ETABS enumeration value).", GH_ParamAccess.list);
-            p.AddTextParameter("cSys", "cSys", "Coordinate system used for the assignment.", GH_ParamAccess.list);
-            p.AddIntegerParameter("direction", "direction", "Load direction (ETABS enumeration value).", GH_ParamAccess.list);
-            p.AddNumberParameter("relDist1", "relDist1", "Relative distance 1.", GH_ParamAccess.list);
-            p.AddNumberParameter("relDist2", "relDist2", "Relative distance 2.", GH_ParamAccess.list);
-            p.AddNumberParameter("dist1", "dist1", "Absolute distance 1.", GH_ParamAccess.list);
-            p.AddNumberParameter("dist2", "dist2", "Absolute distance 2.", GH_ParamAccess.list);
-            p.AddNumberParameter("value1", "value1", "Load value 1.", GH_ParamAccess.list);
-            p.AddNumberParameter("value2", "value2", "Load value 2.", GH_ParamAccess.list);
+            p.AddTextParameter("header", "header", "Header labels describing each value column.", GH_ParamAccess.tree);
+            p.AddGenericParameter("values", "values", "Distributed load rows. Each branch matches the header order.", GH_ParamAccess.tree);
             p.AddTextParameter("msg", "msg", "Status / diagnostic message.", GH_ParamAccess.item);
         }
 
         protected override void SolveInstance(IGH_DataAccess da)
         {
+            bool run = false;
             cSapModel sapModel = null;
             List<string> frameNames = new List<string>();
 
-            if (!da.GetData(0, ref sapModel) || sapModel == null)
+            da.GetData(0, ref run);
+            da.GetData(1, ref sapModel);
+            da.GetDataList(2, frameNames);
+
+            bool rising = !lastRun && run;
+
+            if (!rising)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, "No ETABS SapModel provided.");
-                PushOutputs(da, 0, new List<string>(), new List<string>(), new List<int>(), new List<string>(), new List<int>(),
-                    new List<double>(), new List<double>(), new List<double>(), new List<double>(), new List<double>(), new List<double>(),
-                    "sapModel is null.");
+                da.SetDataTree(0, lastHeaderTree.Duplicate());
+                da.SetDataTree(1, lastValueTree.Duplicate());
+                da.SetData(2, lastMessage);
+                lastRun = run;
                 return;
             }
 
-            da.GetDataList(1, frameNames);
+            if (sapModel == null)
+            {
+                string warning = "sapModel is null. Wire it from the Attach component.";
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, warning);
+                UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), warning, run);
+                return;
+            }
 
             try
             {
                 List<string> trimmed = new List<string>();
+                HashSet<string> seen = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
                 if (frameNames != null)
                 {
                     for (int i = 0; i < frameNames.Count; i++)
                     {
                         string nm = frameNames[i];
-                        if (!string.IsNullOrWhiteSpace(nm))
+                        if (string.IsNullOrWhiteSpace(nm))
                         {
-                            trimmed.Add(nm.Trim());
+                            continue;
+                        }
+
+                        string clean = nm.Trim();
+                        if (seen.Add(clean))
+                        {
+                            trimmed.Add(clean);
                         }
                     }
                 }
 
                 var result = GetFrameDistributed(sapModel, trimmed);
+
+                GH_Structure<GH_String> headerTree = BuildHeaderTree();
+                GH_Structure<GH_ObjectWrapper> valueTree = BuildValueTree(result);
 
                 string status;
                 if (trimmed.Count == 0)
@@ -96,31 +134,18 @@ namespace GhcETABSAPI
                 }
                 else
                 {
-                    status = $"Returned {result.total} distributed loads.";
+                    status = result.total == 0
+                        ? "No distributed loads on the requested frames."
+                        : $"Returned {result.total} distributed loads.";
                 }
 
-                PushOutputs(
-                    da,
-                    result.total,
-                    result.frameName,
-                    result.loadPat,
-                    result.myType,
-                    result.cSys,
-                    result.dir,
-                    result.rd1,
-                    result.rd2,
-                    result.dist1,
-                    result.dist2,
-                    result.val1,
-                    result.val2,
-                    status);
+                UpdateAndPushOutputs(da, headerTree, valueTree, status, run);
             }
             catch (Exception ex)
             {
+                string errorMessage = "Error: " + ex.Message;
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Error, ex.Message);
-                PushOutputs(da, 0, new List<string>(), new List<string>(), new List<int>(), new List<string>(), new List<int>(),
-                    new List<double>(), new List<double>(), new List<double>(), new List<double>(), new List<double>(), new List<double>(),
-                    "Error: " + ex.Message);
+                UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), errorMessage, run);
             }
         }
 
@@ -216,35 +241,58 @@ namespace GhcETABSAPI
             return (total, failCount, frameNameOut, loadPatOut, myTypeOut, cSysOut, dirOut, rd1Out, rd2Out, dist1Out, dist2Out, val1Out, val2Out);
         }
 
-        private static void PushOutputs(
-            IGH_DataAccess da,
-            int total,
-            IList<string> frameName,
-            IList<string> loadPat,
-            IList<int> myType,
-            IList<string> cSys,
-            IList<int> dir,
-            IList<double> rd1,
-            IList<double> rd2,
-            IList<double> dist1,
-            IList<double> dist2,
-            IList<double> val1,
-            IList<double> val2,
-            string message)
+        private static GH_Structure<GH_String> BuildHeaderTree()
         {
-            da.SetData(0, total);
-            da.SetDataList(1, frameName);
-            da.SetDataList(2, loadPat);
-            da.SetDataList(3, myType);
-            da.SetDataList(4, cSys);
-            da.SetDataList(5, dir);
-            da.SetDataList(6, rd1);
-            da.SetDataList(7, rd2);
-            da.SetDataList(8, dist1);
-            da.SetDataList(9, dist2);
-            da.SetDataList(10, val1);
-            da.SetDataList(11, val2);
-            da.SetData(12, message);
+            GH_Structure<GH_String> tree = new GH_Structure<GH_String>();
+            GH_Path path = new GH_Path(0);
+
+            for (int i = 0; i < HeaderLabels.Length; i++)
+            {
+                tree.Append(new GH_String(HeaderLabels[i]), path);
+            }
+
+            return tree;
+        }
+
+        private static GH_Structure<GH_ObjectWrapper> BuildValueTree((int total, int failCount, List<string> frameName, List<string> loadPat,
+            List<int> myType, List<string> cSys, List<int> dir, List<double> rd1, List<double> rd2, List<double> dist1, List<double> dist2,
+            List<double> val1, List<double> val2) result)
+        {
+            GH_Structure<GH_ObjectWrapper> tree = new GH_Structure<GH_ObjectWrapper>();
+
+            int rowCount = result.frameName.Count;
+            for (int i = 0; i < rowCount; i++)
+            {
+                GH_Path path = new GH_Path(i);
+
+                tree.Append(new GH_ObjectWrapper(result.frameName[i]), path);
+                tree.Append(new GH_ObjectWrapper(result.loadPat[i]), path);
+                tree.Append(new GH_ObjectWrapper(result.myType[i]), path);
+                tree.Append(new GH_ObjectWrapper(result.cSys[i]), path);
+                tree.Append(new GH_ObjectWrapper(result.dir[i]), path);
+                tree.Append(new GH_ObjectWrapper(result.rd1[i]), path);
+                tree.Append(new GH_ObjectWrapper(result.rd2[i]), path);
+                tree.Append(new GH_ObjectWrapper(result.dist1[i]), path);
+                tree.Append(new GH_ObjectWrapper(result.dist2[i]), path);
+                tree.Append(new GH_ObjectWrapper(result.val1[i]), path);
+                tree.Append(new GH_ObjectWrapper(result.val2[i]), path);
+            }
+
+            return tree;
+        }
+
+        private void UpdateAndPushOutputs(IGH_DataAccess da, GH_Structure<GH_String> headerTree, GH_Structure<GH_ObjectWrapper> valueTree,
+            string message, bool currentRunState)
+        {
+            lastHeaderTree = headerTree.Duplicate();
+            lastValueTree = valueTree.Duplicate();
+            lastMessage = message;
+
+            da.SetDataTree(0, headerTree);
+            da.SetDataTree(1, valueTree);
+            da.SetData(2, message);
+
+            lastRun = currentRunState;
         }
     }
 }
