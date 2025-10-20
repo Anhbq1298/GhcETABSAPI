@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -176,6 +177,148 @@ namespace GhcETABSAPI
             }
 
             return ws;
+        }
+
+        internal static string WriteDictionaryToWorksheet(
+            IDictionary<string, List<object>> data,
+            IList<string> headers,
+            string workbookPath,
+            string worksheetName,
+            int startRow,
+            int startColumn,
+            string startAddress,
+            bool visible,
+            bool saveAfterWrite,
+            bool readOnly)
+        {
+            if (data == null || data.Count == 0)
+                return "Dictionary is empty.";
+
+            Excel.Application app = null;
+            Excel.Workbook wb = null;
+            Excel.Worksheet ws = null;
+            Excel.Range range = null;
+            Excel.Range topLeft = null;
+            Excel.Range bottomRight = null;
+            bool createdApp = false;
+
+            try
+            {
+                createdApp = AttachOrOpenWorkbook(out app, out wb, workbookPath, visible, readOnly);
+                if (wb == null)
+                    return "Failed to open workbook.";
+
+                ws = GetOrCreateWorksheet(wb, worksheetName);
+                if (ws == null)
+                    return "Failed to access worksheet.";
+
+                List<string> columnKeys = headers != null && headers.Count > 0
+                    ? new List<string>(headers)
+                    : new List<string>(data.Keys);
+
+                foreach (var key in data.Keys)
+                {
+                    if (!columnKeys.Contains(key))
+                        columnKeys.Add(key);
+                }
+
+                int columnCount = columnKeys.Count;
+                if (columnCount == 0)
+                    return "Dictionary is empty.";
+
+                int maxBranchCount = 0;
+                foreach (string key in columnKeys)
+                {
+                    if (data.TryGetValue(key, out var list) && list != null && list.Count > maxBranchCount)
+                        maxBranchCount = list.Count;
+                }
+
+                int totalRows = Math.Max(1, maxBranchCount + 1);
+                object[,] values = new object[totalRows, columnCount];
+
+                for (int col = 0; col < columnCount; col++)
+                {
+                    string header = columnKeys[col] ?? string.Empty;
+                    values[0, col] = header;
+
+                    if (!data.TryGetValue(header, out var branch) || branch == null)
+                        continue;
+
+                    int count = branch.Count;
+                    for (int row = 0; row < count; row++)
+                    {
+                        values[row + 1, col] = branch[row];
+                    }
+                }
+
+                topLeft = (Excel.Range)ws.Cells[startRow, startColumn];
+                bottomRight = (Excel.Range)ws.Cells[startRow + totalRows - 1, startColumn + columnCount - 1];
+                range = ws.Range[topLeft, bottomRight];
+                range.Value2 = values;
+
+                if (saveAfterWrite && !readOnly)
+                {
+                    try { wb.Save(); }
+                    catch { /* ignore */ }
+                }
+
+                string wsName = worksheetName;
+                try { wsName = ws?.Name ?? worksheetName; } catch { }
+
+                string startLabel = string.IsNullOrWhiteSpace(startAddress)
+                    ? ColumnNumberToLetters(startColumn) + Math.Max(1, startRow).ToString(CultureInfo.InvariantCulture)
+                    : startAddress.ToUpperInvariant();
+
+                return string.Format(CultureInfo.InvariantCulture,
+                    "Wrote {0} columns × {1} rows to '{2}' starting at {3}.",
+                    columnCount,
+                    totalRows,
+                    wsName,
+                    startLabel);
+            }
+            catch (Exception ex)
+            {
+                return "Failed: " + ex.Message;
+            }
+            finally
+            {
+                ReleaseCom(range);
+                ReleaseCom(topLeft);
+                ReleaseCom(bottomRight);
+                ReleaseCom(ws);
+
+                if (wb != null && readOnly && createdApp)
+                {
+                    try { wb.Close(false); }
+                    catch { }
+                }
+
+                ReleaseCom(wb);
+
+                if (app != null && createdApp && !visible)
+                {
+                    try { app.Quit(); }
+                    catch { }
+                }
+
+                ReleaseCom(app);
+            }
+        }
+
+        private static string ColumnNumberToLetters(int column)
+        {
+            if (column < 1) column = 1;
+
+            StringBuilder builder = new StringBuilder();
+            int dividend = column;
+            while (dividend > 0)
+            {
+                int modulo = (dividend - 1) % 26;
+                builder.Insert(0, (char)('A' + modulo));
+                dividend = (dividend - modulo) / 26;
+            }
+
+            return builder.Length > 0 ? builder.ToString() : "A";
         }
 
     }

@@ -1,12 +1,260 @@
-﻿using System;
+﻿// -------------------------------------------------------------
+// Component : Write GH Tree To Excel
+// Author    : Anh Bui (extended by ChatGPT)
+// Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
+// Depends   : RhinoCommon, Grasshopper, Microsoft.Office.Interop.Excel
+// Panel     : Category = "ETABS", Subcategory = "0.0 Utility"
+// Build     : x64; Excel interop reference -> Embed Interop Types = False
+//
+// INPUTS (ordered exactly as shown on the component):
+//   0) add            (bool, item) Rising-edge trigger. Runs when it goes False→True.
+//   1) tree           (generic, tree) Data tree to export. Each GH_Path becomes an Excel column.
+//   2) path           (string, item) Workbook path (relative → project directory). Default "TreeExport.xlsx".
+//   3) ws             (string, item) Worksheet name. Created if missing. Default "Sheet1".
+//   4) address        (string, item) Starting Excel address (e.g., "A1"). Defaults to "A1".
+//   5) visible        (bool, item) Show Excel application window. Default true.
+//   6) saveAfterWrite (bool, item) Save workbook after writing (ignored when readOnly). Default true.
+//   7) readOnly       (bool, item) Open workbook read-only. Default false.
+//
+// OUTPUTS:
+//   0) msg            (string, item) Status message (replayed while idle).
+//
+// BEHAVIOR NOTES:
+//   • Rising-edge gate identical to other ETABS utility components (per-instance memory).
+//   • Uses ExcelHelpers to attach to running Excel or create a new hidden instance.
+//   • Each column header is the branch GH_Path.ToString(); rows contain branch values (as best-effort strings/numbers).
+//   • Saves workbook only when saveAfterWrite = true AND readOnly = false.
+//   • Releases COM references explicitly to avoid Excel.exe persistence.
+// -------------------------------------------------------------
+
+using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Drawing;
+using System.Globalization;
+using System.Text.RegularExpressions;
+using Grasshopper.Kernel;
+using Grasshopper.Kernel.Data;
+using Grasshopper.Kernel.Types;
 
 namespace GhcETABSAPI
 {
-    internal class GhcWriteGHTreeToExcel
+    public class GhcWriteGHTreeToExcel : GH_Component
     {
+        private bool lastAdd = false;
+        private string lastMsg = "Idle.";
+
+        public GhcWriteGHTreeToExcel()
+          : base(
+                "Write Tree To Excel",
+                "WriteTreeExcel",
+                "Write a Grasshopper data tree to an Excel worksheet. Each path becomes a column and the branch values populate rows.",
+                "ETABS API",
+                "0.0 Utility")
+        { }
+
+        public override Guid ComponentGuid
+        {
+            get { return new Guid("8f222ec4-2d36-4b3c-9a36-3a642c224f2f"); }
+        }
+
+        protected override Bitmap Icon
+        {
+            get { return null; }
+        }
+
+        protected override void RegisterInputParams(GH_InputParamManager p)
+        {
+            p.AddBooleanParameter("add", "add", "Press to run once (rising edge).", GH_ParamAccess.item, false);
+            p.AddGenericParameter("tree", "tree", "Data tree to export. Each branch becomes an Excel column.", GH_ParamAccess.tree);
+            p.AddTextParameter("path", "path", "Workbook path (.xlsx). Relative paths resolve against the plug-in directory.", GH_ParamAccess.item, "TreeExport.xlsx");
+            p.AddTextParameter("ws", "ws", "Worksheet name. Created if missing.", GH_ParamAccess.item, "Sheet1");
+            p.AddTextParameter("address", "address", "Starting Excel cell address (e.g., A1).", GH_ParamAccess.item, "A1");
+            p.AddBooleanParameter("visible", "visible", "Show Excel window after attaching/opening.", GH_ParamAccess.item, true);
+            p.AddBooleanParameter("saveAfterWrite", "save", "Save workbook after writing (ignored if read-only).", GH_ParamAccess.item, true);
+            p.AddBooleanParameter("readOnly", "readOnly", "Open workbook in read-only mode.", GH_ParamAccess.item, false);
+        }
+
+        protected override void RegisterOutputParams(GH_OutputParamManager p)
+        {
+            p.AddTextParameter("msg", "msg", "Status message.", GH_ParamAccess.item);
+        }
+
+        protected override void SolveInstance(IGH_DataAccess da)
+        {
+            bool add = false;
+            da.GetData(0, ref add);
+
+            bool rising = (!lastAdd) && add;
+            if (!rising)
+            {
+                da.SetData(0, lastMsg);
+                lastAdd = add;
+                return;
+            }
+
+            GH_Structure<IGH_Goo> tree = null;
+            string workbookPath = "TreeExport.xlsx";
+            string worksheetName = "Sheet1";
+            string address = "A1";
+            bool visible = true;
+            bool saveAfterWrite = true;
+            bool readOnly = false;
+
+            da.GetDataTree(1, out tree);
+            da.GetData(2, ref workbookPath);
+            da.GetData(3, ref worksheetName);
+            da.GetData(4, ref address);
+            da.GetData(5, ref visible);
+            da.GetData(6, ref saveAfterWrite);
+            da.GetData(7, ref readOnly);
+
+            string message;
+
+            if (tree == null || tree.PathCount == 0)
+            {
+                message = "Tree is empty.";
+                Finish(da, add, message);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(workbookPath))
+            {
+                message = "Workbook path is empty.";
+                Finish(da, add, message);
+                return;
+            }
+
+            if (!TryParseAddress(address, out int startRow, out int startColumn))
+            {
+                message = "Address is invalid. Use format like A1.";
+                Finish(da, add, message);
+                return;
+            }
+
+            Dictionary<string, List<object>> dictionary = ConvertTreeToDictionary(tree, out List<string> headers);
+            if (dictionary.Count == 0)
+            {
+                message = "Tree is empty.";
+                Finish(da, add, message);
+                return;
+            }
+
+            message = ExcelHelpers.WriteDictionaryToWorksheet(
+                dictionary,
+                headers,
+                workbookPath,
+                worksheetName,
+                startRow,
+                startColumn,
+                address,
+                visible,
+                saveAfterWrite,
+                readOnly);
+
+            Finish(da, add, message);
+        }
+
+        private static Dictionary<string, List<object>> ConvertTreeToDictionary(GH_Structure<IGH_Goo> tree, out List<string> headers)
+        {
+            headers = new List<string>();
+            Dictionary<string, List<object>> dict = new Dictionary<string, List<object>>();
+            if (tree == null) return dict;
+
+            foreach (GH_Path path in tree.Paths)
+            {
+                IList<IGH_Goo> branch = tree.get_Branch(path);
+                List<object> list = new List<object>();
+
+                if (branch != null)
+                {
+                    for (int i = 0; i < branch.Count; i++)
+                    {
+                        list.Add(GooToExcelValue(branch[i]));
+                    }
+                }
+
+                string key = path.ToString();
+                dict[key] = list;
+                headers.Add(key);
+            }
+
+            return dict;
+        }
+
+        private static object GooToExcelValue(IGH_Goo goo)
+        {
+            if (goo == null) return string.Empty;
+
+            try
+            {
+                if (goo is GH_Number num) return num.Value;
+                if (goo is GH_Integer ghInt) return ghInt.Value;
+                if (goo is GH_Boolean ghBool) return ghBool.Value;
+                if (goo is GH_String ghString) return ghString.Value ?? string.Empty;
+                if (goo is GH_Time ghTime) return ghTime.Value;
+                if (goo is GH_ComplexNumber ghComplex) return ghComplex.ToString();
+                if (goo is IGH_String genericString)
+                {
+                    string s;
+                    if (genericString.CastTo(out s)) return s;
+                }
+
+                object script = goo.ScriptVariable();
+                if (script == null) return goo.ToString();
+
+                if (script is string) return script;
+                if (script is bool || script is int || script is double || script is float || script is decimal)
+                    return script;
+
+                return script.ToString();
+            }
+            catch
+            {
+                return goo.ToString();
+            }
+        }
+
+        private static bool TryParseAddress(string address, out int row, out int column)
+        {
+            row = 1;
+            column = 1;
+
+            if (string.IsNullOrWhiteSpace(address))
+                return true;
+
+            Match match = Regex.Match(address.Trim(), "^([A-Za-z]+)(\\d+)$");
+            if (!match.Success) return false;
+
+            column = ColumnLettersToNumber(match.Groups[1].Value);
+            if (!int.TryParse(match.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out row))
+            {
+                row = 1;
+            }
+
+            return column > 0 && row > 0;
+        }
+
+        private static int ColumnLettersToNumber(string letters)
+        {
+            if (string.IsNullOrWhiteSpace(letters)) return 1;
+
+            int result = 0;
+            string upper = letters.ToUpperInvariant();
+            for (int i = 0; i < upper.Length; i++)
+            {
+                char c = upper[i];
+                if (c < 'A' || c > 'Z') return 1;
+                result = result * 26 + (c - 'A' + 1);
+            }
+
+            return Math.Max(1, result);
+        }
+
+        private void Finish(IGH_DataAccess da, bool add, string message)
+        {
+            lastMsg = message ?? string.Empty;
+            da.SetData(0, lastMsg);
+            lastAdd = add;
+        }
     }
 }
