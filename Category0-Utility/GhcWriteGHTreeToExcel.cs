@@ -75,11 +75,12 @@ namespace GhcETABSAPI
             p.AddBooleanParameter("visible", "visible", "Show Excel window after attaching/opening.", GH_ParamAccess.item, true);
             p.AddBooleanParameter("saveAfterWrite", "save", "Save workbook after writing (ignored if read-only).", GH_ParamAccess.item, true);
             p.AddBooleanParameter("readOnly", "readOnly", "Open workbook in read-only mode.", GH_ParamAccess.item, false);
-            p.AddTextParameter(
+            int headerIndex = p.AddTextParameter(
                 "headers",
                 "headers",
                 "Optional list of header labels. When supplied, entries are applied to columns in list order.",
                 GH_ParamAccess.list);
+            p[headerIndex].Optional = true;
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager p)
@@ -143,7 +144,11 @@ namespace GhcETABSAPI
                 return;
             }
 
-            Dictionary<string, List<object>> dictionary = ConvertTreeToDictionary(tree, headerOverrides, out List<string> headers);
+            Dictionary<string, List<object>> dictionary = ConvertTreeToDictionary(
+                tree,
+                headerOverrides,
+                out List<string> columnKeys,
+                out List<string> headers);
             if (dictionary.Count == 0)
             {
                 message = "Tree is empty.";
@@ -157,6 +162,7 @@ namespace GhcETABSAPI
             message = ExcelHelpers.WriteDictionaryToWorksheet(
                 dictionary,
                 headers,
+                columnKeys,
                 wb,                // reuse existing workbook
                 worksheetName,                // reuse existing worksheet
                 startRow,
@@ -171,14 +177,15 @@ namespace GhcETABSAPI
         private static Dictionary<string, List<object>> ConvertTreeToDictionary(
             GH_Structure<IGH_Goo> tree,
             IList<string> headerOverrides,
+            out List<string> columnKeys,
             out List<string> headers)
         {
             headers = new List<string>();
+            columnKeys = new List<string>();
             Dictionary<string, List<object>> dict = new Dictionary<string, List<object>>();
             if (tree == null) return dict;
 
-            List<(string key, List<object> values)> orderedColumns = new List<(string, List<object>)>();
-
+            int index = 0;
             foreach (GH_Path path in tree.Paths)
             {
                 var branch = tree.get_Branch(path);
@@ -193,19 +200,26 @@ namespace GhcETABSAPI
                 }
 
                 string key = path.ToString();
-                orderedColumns.Add((key, list));
-            }
+                dict[key] = list;
+                columnKeys.Add(key);
 
-            HashSet<string> usedHeaders = new HashSet<string>(StringComparer.Ordinal);
+                string headerLabel = null;
+                if (headerOverrides != null && index < headerOverrides.Count)
+                {
+                    headerLabel = headerOverrides[index];
+                }
 
-            for (int i = 0; i < orderedColumns.Count; i++)
-            {
-                var column = orderedColumns[i];
-                string desiredHeader = (headerOverrides != null && i < headerOverrides.Count) ? headerOverrides[i] : null;
-                string resolvedHeader = ResolveHeader(desiredHeader, column.key, usedHeaders);
+                if (string.IsNullOrWhiteSpace(headerLabel))
+                {
+                    headerLabel = key;
+                }
+                else
+                {
+                    headerLabel = headerLabel.Trim();
+                }
 
-                headers.Add(resolvedHeader);
-                dict[resolvedHeader] = column.values;
+                headers.Add(headerLabel);
+                index++;
             }
 
             return dict;

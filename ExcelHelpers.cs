@@ -167,6 +167,7 @@ namespace GhcETABSAPI
         internal static string WriteDictionaryToWorksheet(
             IDictionary<string, List<object>> data,
             IList<string> headers,
+            IList<string> columnOrder,
             Excel.Workbook wb,          // reuse existing workbook (no attach/open here)
             string worksheetName,       // sheet name instead of Excel.Worksheet
             int startRow,
@@ -188,21 +189,43 @@ namespace GhcETABSAPI
                 ws = GetOrCreateWorksheet(wb, worksheetName);
                 if (ws == null) return "Failed to access worksheet.";
 
-                // Build column order (headers act as keys if provided)
-                var columnKeys = (headers != null && headers.Count > 0)
-                    ? new List<string>(headers)
-                    : new List<string>(data.Keys);
+                // Build column order (explicit order preferred, otherwise dictionary order)
+                List<string> columnKeys = null;
+                if (columnOrder != null && columnOrder.Count > 0)
+                {
+                    columnKeys = new List<string>(columnOrder);
+                }
+                else if (data != null)
+                {
+                    columnKeys = new List<string>(data.Keys);
+                }
+                else
+                {
+                    columnKeys = new List<string>();
+                }
 
-                foreach (var k in data.Keys)
-                    if (!columnKeys.Contains(k)) columnKeys.Add(k);
+                if (data != null)
+                {
+                    foreach (var key in data.Keys)
+                    {
+                        if (!columnKeys.Contains(key))
+                        {
+                            columnKeys.Add(key);
+                        }
+                    }
+                }
 
                 int colCount = columnKeys.Count;
                 if (colCount == 0) return "Dictionary is empty.";
 
                 int maxRows = 0;
                 foreach (var k in columnKeys)
-                    if (data.TryGetValue(k, out var lst) && lst != null && lst.Count > maxRows)
+                {
+                    if (data != null && data.TryGetValue(k, out var lst) && lst != null && lst.Count > maxRows)
+                    {
                         maxRows = lst.Count;
+                    }
+                }
 
                 int totalRows = Math.Max(1, maxRows + 1); // +1 for header row
                 var values = new object[totalRows, colCount];
@@ -210,9 +233,15 @@ namespace GhcETABSAPI
                 for (int c = 0; c < colCount; c++)
                 {
                     string key = columnKeys[c] ?? string.Empty;
-                    values[0, c] = key; // header label = key by default
+                    string headerLabel = key;
+                    if (headers != null && c < headers.Count && !string.IsNullOrWhiteSpace(headers[c]))
+                    {
+                        headerLabel = headers[c];
+                    }
 
-                    if (!data.TryGetValue(key, out var branch) || branch == null) continue;
+                    values[0, c] = headerLabel ?? string.Empty;
+
+                    if (data == null || !data.TryGetValue(key, out var branch) || branch == null) continue;
                     for (int r = 0; r < branch.Count; r++)
                         values[r + 1, c] = branch[r];
                 }
