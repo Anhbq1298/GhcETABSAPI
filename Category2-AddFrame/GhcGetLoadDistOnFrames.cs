@@ -7,10 +7,9 @@
 // GUID      : a1cfe4a7-9d49-42eb-aac9-774cdd7d1e84
 // -------------------------------------------------------------
 // Inputs (ordered):
-//   0) run         (bool, item)    Rising-edge trigger (exec only when False→True).
-//   1) sapModel    (ETABSv1.cSapModel, item)  ETABS model from your Attach component.
-//   2) frameNames  (string, list)  Frame object names to query. Blank/dup ignored (case-insensitive).
-//   3) loadPattern (string, list)  OPTIONAL filters. If UNCONNECTED or empty → treated as null (no filter).
+//   0) sapModel    (ETABSv1.cSapModel, item)  ETABS model from your Attach component.
+//   1) frameNames  (string, list)  Frame object names to query. Blank/dup ignored (case-insensitive).
+//   2) loadPattern (string, list)  OPTIONAL filters. If UNCONNECTED or empty → treated as null (no filter).
 //
 // Outputs:
 //   0) header  (text, tree)   Single branch of column labels.
@@ -18,14 +17,12 @@
 //   2) msg     (text, item)   Status / diagnostics.
 //
 // Behavior Notes:
-//   • Rising-edge gate: when “run” is not rising, component replays last outputs (no ETABS call).
 //   • frameNames are trimmed and de-duplicated (OrdinalIgnoreCase).
 //   • loadPattern is OPTIONAL; null ⇒ return all patterns; when provided, filter is case-insensitive.
 //   • Values tree is column-oriented to match header labels:
 //       [0] FrameName, [1] LoadPattern, [2] Type, [3] CoordinateSystem, [4] Direction,
 //       [5] RelDist1, [6] RelDist2, [7] Dist1, [8] Dist2, [9] Value1, [10] Value2.
 //   • Uses per-object mode: FrameObj.GetLoadDistributed(..., eItemType.Objects).
-//   • Caches last output/message for responsive UI when user toggles run.
 // -------------------------------------------------------------
 
 using System;
@@ -39,8 +36,6 @@ namespace GhcETABSAPI
 {
     public class GhcGetLoadDistOnFrames : GH_Component
     {
-        private const string IdleMessage = "Idle.";
-
         private static readonly string[] HeaderLabels =
         {
             "FrameName",
@@ -55,11 +50,6 @@ namespace GhcETABSAPI
             "Value1",
             "Value2"
         };
-
-        private bool lastRun;
-        private GH_Structure<GH_String> lastHeaderTree = BuildHeaderTree();
-        private GH_Structure<GH_ObjectWrapper> lastValueTree = new GH_Structure<GH_ObjectWrapper>();
-        private string lastMessage = IdleMessage;
 
         public GhcGetLoadDistOnFrames()
           : base(
@@ -77,7 +67,6 @@ namespace GhcETABSAPI
 
         protected override void RegisterInputParams(GH_InputParamManager p)
         {
-            p.AddBooleanParameter("run", "run", "Press to query (rising edge trigger).", GH_ParamAccess.item, false);
             p.AddGenericParameter("sapModel", "sapModel", "ETABS cSapModel from the Attach component.", GH_ParamAccess.item);
             p.AddTextParameter(
                 "frameNames",
@@ -103,35 +92,22 @@ namespace GhcETABSAPI
 
         protected override void SolveInstance(IGH_DataAccess da)
         {
-            bool run = false;
             cSapModel sapModel = null;
             var frameNames = new List<string>();
 
-            da.GetData(0, ref run);
-            da.GetData(1, ref sapModel);
-            da.GetDataList(2, frameNames);
+            da.GetData(0, ref sapModel);
+            da.GetDataList(1, frameNames);
 
             // Try to read load patterns. If none supplied or list empty → null (no filter).
             var lpRaw = new List<string>();
-            bool gotLP = da.GetDataList(3, lpRaw);
+            bool gotLP = da.GetDataList(2, lpRaw);
             List<string> loadPatternFilters = (gotLP && lpRaw != null && lpRaw.Count > 0) ? lpRaw : null;
-
-            bool rising = !lastRun && run;
-
-            if (!rising)
-            {
-                da.SetDataTree(0, lastHeaderTree.Duplicate());
-                da.SetDataTree(1, lastValueTree.Duplicate());
-                da.SetData(2, lastMessage);
-                lastRun = run;
-                return;
-            }
 
             if (sapModel == null)
             {
                 string warning = "sapModel is null. Wire it from the Attach component.";
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, warning);
-                UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), warning, run);
+                PushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), warning);
                 return;
             }
 
@@ -218,13 +194,13 @@ namespace GhcETABSAPI
                         : $"Returned {result.total} distributed loads.";
                 }
 
-                UpdateAndPushOutputs(da, headerTree, valueTree, status, run);
+                PushOutputs(da, headerTree, valueTree, status);
             }
             catch (Exception ex)
             {
                 string errorMessage = "Error: " + ex.Message;
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Error, ex.Message);
-                UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), errorMessage, run);
+                PushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), errorMessage);
             }
         }
 
@@ -419,21 +395,14 @@ namespace GhcETABSAPI
             return $"load patterns ({string.Join(", ", filters)})";
         }
 
-        private void UpdateAndPushOutputs(IGH_DataAccess da,
+        private static void PushOutputs(IGH_DataAccess da,
             GH_Structure<GH_String> headerTree,
             GH_Structure<GH_ObjectWrapper> valueTree,
-            string message,
-            bool currentRunState)
+            string message)
         {
-            lastHeaderTree = headerTree.Duplicate();
-            lastValueTree = valueTree.Duplicate();
-            lastMessage = message;
-
             da.SetDataTree(0, headerTree);
             da.SetDataTree(1, valueTree);
             da.SetData(2, message);
-
-            lastRun = currentRunState;
         }
     }
 }
