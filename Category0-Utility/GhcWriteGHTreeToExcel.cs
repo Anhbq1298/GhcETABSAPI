@@ -225,6 +225,25 @@ namespace GhcETABSAPI
             return dict;
         }
 
+        private static string ResolveHeader(string desired, string fallback, HashSet<string> used)
+        {
+            string baseHeader = string.IsNullOrWhiteSpace(desired) ? fallback : desired.Trim();
+            if (string.IsNullOrEmpty(baseHeader))
+            {
+                baseHeader = "Column";
+            }
+
+            string candidate = baseHeader;
+            int suffix = 1;
+            while (used.Contains(candidate))
+            {
+                candidate = string.Format(CultureInfo.InvariantCulture, "{0}_{1}", baseHeader, suffix++);
+            }
+
+            used.Add(candidate);
+            return candidate;
+        }
+
         private static object GooToExcelValue(IGH_Goo goo)
         {
             if (goo == null) return string.Empty;
