@@ -7,6 +7,10 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using Excel = Microsoft.Office.Interop.Excel;
+using Microsoft.CSharp.RuntimeBinder;
+using Microsoft.VisualBasic;
+
+
 
 namespace GhcETABSAPI
 {
@@ -14,6 +18,7 @@ namespace GhcETABSAPI
     {
         // Prevent overlapping COM calls in multi-threaded contexts
         private static readonly object _excelLock = new object();
+
 
         /// <summary>
         /// Convert a relative path to full path using AppDomain.BaseDirectory.
@@ -71,9 +76,9 @@ namespace GhcETABSAPI
                 string path = ProjectRelative(filePathOrRelative);
                 if (string.IsNullOrWhiteSpace(path)) return false;
 
-                // 1) Try to attach to running Excel
-                try { app = Marshal.GetActiveObject("Excel.Application") as Excel.Application; }
-                catch { /* none running */ }
+                // 1) Attach to running Excel via VB Interaction (no P/Invoke, C# 7.3 friendly)
+                try { app = Interaction.GetObject(null, "Excel.Application") as Excel.Application; }
+                catch { app = null; }
 
                 // 2) Create application if none
                 if (app == null)
@@ -82,17 +87,17 @@ namespace GhcETABSAPI
                     createdApplication = true;
                 }
 
-                // ALWAYS honor visibility (even on attach)
+                // Honor visibility (even on attach)
                 try
                 {
+                    app.Visible = visible;
                     if (visible)
                     {
-                        app.Visible = true;
                         app.UserControl = true;
-                        app.WindowState = Excel.XlWindowState.xlMaximized;
+                        try { app.WindowState = Excel.XlWindowState.xlMaximized; } catch { }
                     }
                 }
-                catch { /* ignore */ }
+                catch { }
 
                 // 3) If workbook already open in this app, bind to it
                 try
@@ -100,27 +105,33 @@ namespace GhcETABSAPI
                     string fullPath = Path.GetFullPath(path);
                     string fileName = Path.GetFileName(fullPath);
 
-                    for (int i = 1; i <= app.Workbooks.Count; i++)
+                    int count = app.Workbooks.Count;
+                    for (int i = 1; i <= count; i++)
                     {
-                        var w = app.Workbooks[i];
+                        Excel.Workbook w = null;
+                        try { w = app.Workbooks[i]; } catch { }
+                        if (w == null) continue;
+
                         bool same = false;
                         try
                         {
-                            same = string.Equals(
-                                Path.GetFullPath(w.FullName),
-                                fullPath,
-                                StringComparison.OrdinalIgnoreCase);
+                            string wFull = null;
+                            try { wFull = Path.GetFullPath(w.FullName); } catch { }
+                            if (!string.IsNullOrEmpty(wFull))
+                                same = string.Equals(wFull, fullPath, StringComparison.OrdinalIgnoreCase);
+                            else
+                                same = string.Equals(w.Name, fileName, StringComparison.OrdinalIgnoreCase);
                         }
                         catch { }
 
-                        if (same || string.Equals(w.Name, fileName, StringComparison.OrdinalIgnoreCase))
+                        if (same)
                         {
                             wb = w;
                             break;
                         }
                     }
                 }
-                catch { /* ignore */ }
+                catch { }
 
                 // 4) Open or create the workbook
                 if (wb == null)
@@ -133,15 +144,17 @@ namespace GhcETABSAPI
                     {
                         string dir = Path.GetDirectoryName(path);
                         if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
-                            Directory.CreateDirectory(dir);
+                        {
+                            try { Directory.CreateDirectory(dir); } catch { }
+                        }
 
                         wb = app.Workbooks.Add();
-                        wb.SaveAs(path, Excel.XlFileFormat.xlOpenXMLWorkbook);
+                        try { wb.SaveAs(path, Excel.XlFileFormat.xlOpenXMLWorkbook); } catch { }
                     }
                 }
 
-                // 5) Always activate before returning (no input needed)
-                try { wb.Activate(); } catch { /* ignore */ }
+                // 5) Activate before returning
+                try { wb.Activate(); } catch { }
 
                 return createdApplication;
             }
@@ -179,102 +192,82 @@ namespace GhcETABSAPI
             return ws;
         }
 
+        // Using existing workbook/worksheet (no attach/open here)
         internal static string WriteDictionaryToWorksheet(
             IDictionary<string, List<object>> data,
             IList<string> headers,
-            string workbookPath,
-            string worksheetName,
+            Excel.Workbook wb,          // reuse existing workbook (no attach/open here)
+            string worksheetName,       // sheet name instead of Excel.Worksheet
             int startRow,
             int startColumn,
             string startAddress,
-            bool visible,
             bool saveAfterWrite,
             bool readOnly)
         {
-            if (data == null || data.Count == 0)
-                return "Dictionary is empty.";
+            if (data == null || data.Count == 0) return "Dictionary is empty.";
+            if (wb == null) return "Workbook is null.";
+            if (string.IsNullOrWhiteSpace(worksheetName)) worksheetName = "Sheet1";
 
-            Excel.Application app = null;
-            Excel.Workbook wb = null;
             Excel.Worksheet ws = null;
-            Excel.Range range = null;
-            Excel.Range topLeft = null;
-            Excel.Range bottomRight = null;
-            bool createdApp = false;
+            Excel.Range range = null, topLeft = null, bottomRight = null;
 
             try
             {
-                createdApp = AttachOrOpenWorkbook(out app, out wb, workbookPath, visible, readOnly);
-                if (wb == null)
-                    return "Failed to open workbook.";
-
+                // Get or create the target worksheet
                 ws = GetOrCreateWorksheet(wb, worksheetName);
-                if (ws == null)
-                    return "Failed to access worksheet.";
+                if (ws == null) return "Failed to access worksheet.";
 
-                List<string> columnKeys = headers != null && headers.Count > 0
+                // Build column order (headers act as keys if provided)
+                var columnKeys = (headers != null && headers.Count > 0)
                     ? new List<string>(headers)
                     : new List<string>(data.Keys);
 
-                foreach (var key in data.Keys)
+                foreach (var k in data.Keys)
+                    if (!columnKeys.Contains(k)) columnKeys.Add(k);
+
+                int colCount = columnKeys.Count;
+                if (colCount == 0) return "Dictionary is empty.";
+
+                int maxRows = 0;
+                foreach (var k in columnKeys)
+                    if (data.TryGetValue(k, out var lst) && lst != null && lst.Count > maxRows)
+                        maxRows = lst.Count;
+
+                int totalRows = Math.Max(1, maxRows + 1); // +1 for header row
+                var values = new object[totalRows, colCount];
+
+                for (int c = 0; c < colCount; c++)
                 {
-                    if (!columnKeys.Contains(key))
-                        columnKeys.Add(key);
+                    string key = columnKeys[c] ?? string.Empty;
+                    values[0, c] = key; // header label = key by default
+
+                    if (!data.TryGetValue(key, out var branch) || branch == null) continue;
+                    for (int r = 0; r < branch.Count; r++)
+                        values[r + 1, c] = branch[r];
                 }
 
-                int columnCount = columnKeys.Count;
-                if (columnCount == 0)
-                    return "Dictionary is empty.";
-
-                int maxBranchCount = 0;
-                foreach (string key in columnKeys)
-                {
-                    if (data.TryGetValue(key, out var list) && list != null && list.Count > maxBranchCount)
-                        maxBranchCount = list.Count;
-                }
-
-                int totalRows = Math.Max(1, maxBranchCount + 1);
-                object[,] values = new object[totalRows, columnCount];
-
-                for (int col = 0; col < columnCount; col++)
-                {
-                    string header = columnKeys[col] ?? string.Empty;
-                    values[0, col] = header;
-
-                    if (!data.TryGetValue(header, out var branch) || branch == null)
-                        continue;
-
-                    int count = branch.Count;
-                    for (int row = 0; row < count; row++)
-                    {
-                        values[row + 1, col] = branch[row];
-                    }
-                }
+                // Write block
+                startRow = Math.Max(1, startRow);
+                startColumn = Math.Max(1, startColumn);
 
                 topLeft = (Excel.Range)ws.Cells[startRow, startColumn];
-                bottomRight = (Excel.Range)ws.Cells[startRow + totalRows - 1, startColumn + columnCount - 1];
+                bottomRight = (Excel.Range)ws.Cells[startRow + totalRows - 1, startColumn + colCount - 1];
                 range = ws.Range[topLeft, bottomRight];
                 range.Value2 = values;
 
                 if (saveAfterWrite && !readOnly)
                 {
-                    try { wb.Save(); }
-                    catch { /* ignore */ }
+                    try { wb.Save(); } catch { /* ignore */ }
                 }
 
-                string wsName = worksheetName;
-                try { wsName = ws?.Name ?? worksheetName; } catch { }
-
+                string wsName = ws?.Name ?? worksheetName;
                 string startLabel = string.IsNullOrWhiteSpace(startAddress)
                     ? ColumnNumberToLetters(startColumn) + Math.Max(1, startRow).ToString(CultureInfo.InvariantCulture)
                     : startAddress.ToUpperInvariant();
 
                 return string.Format(CultureInfo.InvariantCulture,
                     "Wrote {0} columns × {1} rows to '{2}' starting at {3}.",
-                    columnCount,
-                    totalRows,
-                    wsName,
-                    startLabel);
+                    colCount, totalRows, wsName, startLabel);
             }
             catch (Exception ex)
             {
@@ -285,23 +278,7 @@ namespace GhcETABSAPI
                 ReleaseCom(range);
                 ReleaseCom(topLeft);
                 ReleaseCom(bottomRight);
-                ReleaseCom(ws);
-
-                if (wb != null && readOnly && createdApp)
-                {
-                    try { wb.Close(false); }
-                    catch { }
-                }
-
-                ReleaseCom(wb);
-
-                if (app != null && createdApp && !visible)
-                {
-                    try { app.Quit(); }
-                    catch { }
-                }
-
-                ReleaseCom(app);
+                ReleaseCom(ws); // we created the WS RCW here; caller still owns the workbook
             }
         }
 

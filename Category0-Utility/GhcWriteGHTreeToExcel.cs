@@ -35,6 +35,8 @@ using System.Text.RegularExpressions;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
+using System.Runtime.InteropServices;
+using Excel = Microsoft.Office.Interop.Excel;
 
 namespace GhcETABSAPI
 {
@@ -108,6 +110,8 @@ namespace GhcETABSAPI
             da.GetData(6, ref saveAfterWrite);
             da.GetData(7, ref readOnly);
 
+            Excel.Application app;
+            Excel.Workbook wb;
             string message;
 
             if (tree == null || tree.PathCount == 0)
@@ -139,15 +143,17 @@ namespace GhcETABSAPI
                 return;
             }
 
+            bool createdApplication = ExcelHelpers.AttachOrOpenWorkbook(out app, out wb, workbookPath, visible: true);
+
+
             message = ExcelHelpers.WriteDictionaryToWorksheet(
                 dictionary,
                 headers,
-                workbookPath,
-                worksheetName,
+                wb,                // reuse existing workbook
+                worksheetName,                // reuse existing worksheet
                 startRow,
                 startColumn,
-                address,
-                visible,
+                address,           // only for message text
                 saveAfterWrite,
                 readOnly);
 

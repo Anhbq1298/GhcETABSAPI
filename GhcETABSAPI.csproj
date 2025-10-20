@@ -30,12 +30,12 @@
       <Guid>00020813-0000-0000-c000-000000000046</Guid>
       <Lcid>0</Lcid>
       <Isolated>false</Isolated>
-      <EmbedInteropTypes>true</EmbedInteropTypes>
+      <EmbedInteropTypes>True</EmbedInteropTypes>
     </COMReference>
   </ItemGroup>
   
   <ItemGroup>
-	  <PackageReference Include="Grasshopper" Version="8.*" ExcludeAssets="runtime" />
+	  <PackageReference Include="Grasshopper" Version="8.0.23304.9001" ExcludeAssets="runtime" />
   </ItemGroup>
   
   <!-- For Windows only builds -->
@@ -57,6 +57,8 @@
     <Reference Include="ETABSv1">
       <HintPath>ETABSv1.dll</HintPath>
     </Reference>
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="Microsoft.VisualBasic" />
   </ItemGroup>
   <ItemGroup>
     <Compile Update="Properties\Resources.Designer.cs">
