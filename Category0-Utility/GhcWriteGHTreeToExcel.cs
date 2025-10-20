@@ -15,6 +15,7 @@
 //   5) visible        (bool, item) Show Excel application window. Default true.
 //   6) saveAfterWrite (bool, item) Save workbook after writing (ignored when readOnly). Default true.
 //   7) readOnly       (bool, item) Open workbook read-only. Default false.
+//   8) headers        (string, list) Optional column headers applied in list order when provided.
 //
 // OUTPUTS:
 //   0) msg            (string, item) Status message (replayed while idle).
@@ -74,6 +75,12 @@ namespace GhcETABSAPI
             p.AddBooleanParameter("visible", "visible", "Show Excel window after attaching/opening.", GH_ParamAccess.item, true);
             p.AddBooleanParameter("saveAfterWrite", "save", "Save workbook after writing (ignored if read-only).", GH_ParamAccess.item, true);
             p.AddBooleanParameter("readOnly", "readOnly", "Open workbook in read-only mode.", GH_ParamAccess.item, false);
+            int headerIndex = p.AddTextParameter(
+                "headers",
+                "headers",
+                "Optional list of header labels. When supplied, entries are applied to columns in list order.",
+                GH_ParamAccess.list);
+            p[headerIndex].Optional = true;
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager p)
@@ -101,6 +108,7 @@ namespace GhcETABSAPI
             bool visible = true;
             bool saveAfterWrite = true;
             bool readOnly = false;
+            List<string> headerOverrides = new List<string>();
 
             da.GetDataTree(1, out tree);
             da.GetData(2, ref workbookPath);
@@ -109,6 +117,7 @@ namespace GhcETABSAPI
             da.GetData(5, ref visible);
             da.GetData(6, ref saveAfterWrite);
             da.GetData(7, ref readOnly);
+            da.GetDataList(8, headerOverrides);
 
             Excel.Application app;
             Excel.Workbook wb;
@@ -135,7 +144,11 @@ namespace GhcETABSAPI
                 return;
             }
 
-            Dictionary<string, List<object>> dictionary = ConvertTreeToDictionary(tree, out List<string> headers);
+            Dictionary<string, List<object>> dictionary = ConvertTreeToDictionary(
+                tree,
+                headerOverrides,
+                out List<string> columnKeys,
+                out List<string> headers);
             if (dictionary.Count == 0)
             {
                 message = "Tree is empty.";
@@ -149,6 +162,7 @@ namespace GhcETABSAPI
             message = ExcelHelpers.WriteDictionaryToWorksheet(
                 dictionary,
                 headers,
+                columnKeys,
                 wb,                // reuse existing workbook
                 worksheetName,                // reuse existing worksheet
                 startRow,
@@ -160,12 +174,18 @@ namespace GhcETABSAPI
             Finish(da, add, message);
         }
 
-        private static Dictionary<string, List<object>> ConvertTreeToDictionary(GH_Structure<IGH_Goo> tree, out List<string> headers)
+        private static Dictionary<string, List<object>> ConvertTreeToDictionary(
+            GH_Structure<IGH_Goo> tree,
+            IList<string> headerOverrides,
+            out List<string> columnKeys,
+            out List<string> headers)
         {
             headers = new List<string>();
+            columnKeys = new List<string>();
             Dictionary<string, List<object>> dict = new Dictionary<string, List<object>>();
             if (tree == null) return dict;
 
+            int index = 0;
             foreach (GH_Path path in tree.Paths)
             {
                 var branch = tree.get_Branch(path);
@@ -181,7 +201,25 @@ namespace GhcETABSAPI
 
                 string key = path.ToString();
                 dict[key] = list;
-                headers.Add(key);
+                columnKeys.Add(key);
+
+                string headerLabel = null;
+                if (headerOverrides != null && index < headerOverrides.Count)
+                {
+                    headerLabel = headerOverrides[index];
+                }
+
+                if (string.IsNullOrWhiteSpace(headerLabel))
+                {
+                    headerLabel = key;
+                }
+                else
+                {
+                    headerLabel = headerLabel.Trim();
+                }
+
+                headers.Add(headerLabel);
+                index++;
             }
 
             return dict;
