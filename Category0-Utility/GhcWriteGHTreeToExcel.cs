@@ -74,6 +74,12 @@ namespace GhcETABSAPI
             p.AddBooleanParameter("visible", "visible", "Show Excel window after attaching/opening.", GH_ParamAccess.item, true);
             p.AddBooleanParameter("saveAfterWrite", "save", "Save workbook after writing (ignored if read-only).", GH_ParamAccess.item, true);
             p.AddBooleanParameter("readOnly", "readOnly", "Open workbook in read-only mode.", GH_ParamAccess.item, false);
+            p.AddBooleanParameter(
+                "overwriteHeaders",
+                "headerIdx",
+                "Overwrite column headers with sequential labels based on list order (1, 2, 3, …).",
+                GH_ParamAccess.item,
+                false);
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager p)
@@ -101,6 +107,7 @@ namespace GhcETABSAPI
             bool visible = true;
             bool saveAfterWrite = true;
             bool readOnly = false;
+            bool overwriteHeaders = false;
 
             da.GetDataTree(1, out tree);
             da.GetData(2, ref workbookPath);
@@ -109,6 +116,7 @@ namespace GhcETABSAPI
             da.GetData(5, ref visible);
             da.GetData(6, ref saveAfterWrite);
             da.GetData(7, ref readOnly);
+            da.GetData(8, ref overwriteHeaders);
 
             Excel.Application app;
             Excel.Workbook wb;
@@ -135,7 +143,7 @@ namespace GhcETABSAPI
                 return;
             }
 
-            Dictionary<string, List<object>> dictionary = ConvertTreeToDictionary(tree, out List<string> headers);
+            Dictionary<string, List<object>> dictionary = ConvertTreeToDictionary(tree, overwriteHeaders, out List<string> headers);
             if (dictionary.Count == 0)
             {
                 message = "Tree is empty.";
@@ -160,11 +168,16 @@ namespace GhcETABSAPI
             Finish(da, add, message);
         }
 
-        private static Dictionary<string, List<object>> ConvertTreeToDictionary(GH_Structure<IGH_Goo> tree, out List<string> headers)
+        private static Dictionary<string, List<object>> ConvertTreeToDictionary(
+            GH_Structure<IGH_Goo> tree,
+            bool overwriteHeaders,
+            out List<string> headers)
         {
             headers = new List<string>();
             Dictionary<string, List<object>> dict = new Dictionary<string, List<object>>();
             if (tree == null) return dict;
+
+            List<(string key, List<object> values)> orderedColumns = new List<(string, List<object>)>();
 
             foreach (GH_Path path in tree.Paths)
             {
@@ -180,8 +193,25 @@ namespace GhcETABSAPI
                 }
 
                 string key = path.ToString();
-                dict[key] = list;
-                headers.Add(key);
+                orderedColumns.Add((key, list));
+            }
+
+            if (overwriteHeaders)
+            {
+                for (int i = 0; i < orderedColumns.Count; i++)
+                {
+                    string header = (i + 1).ToString(CultureInfo.InvariantCulture);
+                    headers.Add(header);
+                    dict[header] = orderedColumns[i].values;
+                }
+            }
+            else
+            {
+                foreach (var column in orderedColumns)
+                {
+                    headers.Add(column.key);
+                    dict[column.key] = column.values;
+                }
             }
 
             return dict;
