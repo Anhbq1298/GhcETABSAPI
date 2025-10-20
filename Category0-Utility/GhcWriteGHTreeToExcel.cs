@@ -162,14 +162,14 @@ namespace GhcETABSAPI
 
             foreach (GH_Path path in tree.Paths)
             {
-                IList<IGH_Goo> branch = tree.get_Branch(path);
+                var branch = tree.get_Branch(path);
                 List<object> list = new List<object>();
 
                 if (branch != null)
                 {
-                    for (int i = 0; i < branch.Count; i++)
+                    foreach (IGH_Goo goo in branch)
                     {
-                        list.Add(GooToExcelValue(branch[i]));
+                        list.Add(GooToExcelValue(goo));
                     }
                 }
 
@@ -193,11 +193,8 @@ namespace GhcETABSAPI
                 if (goo is GH_String ghString) return ghString.Value ?? string.Empty;
                 if (goo is GH_Time ghTime) return ghTime.Value;
                 if (goo is GH_ComplexNumber ghComplex) return ghComplex.ToString();
-                if (goo is IGH_String genericString)
-                {
-                    string s;
-                    if (genericString.CastTo(out s)) return s;
-                }
+
+                if (goo.CastTo(out string casted)) return casted;
 
                 object script = goo.ScriptVariable();
                 if (script == null) return goo.ToString();
