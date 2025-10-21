@@ -13,10 +13,9 @@
 //   2) path           (string, item) Workbook path (relative → plugin directory). Default "TreeExport.xlsx".
 //   3) ws             (string, item) Worksheet name. Created if missing. Default "Sheet1".
 //   4) address        (string, item) Starting Excel address (e.g., "A1"). Defaults to "A1".
-//   5) visible        (bool, item)  Show Excel application window. Default true.
-//   6) saveAfterWrite (bool, item)  Save workbook after writing (ignored when readOnly). Default true.
-//   7) readOnly       (bool, item)  Open workbook read-only. Default false.
-//   8) headers        (string, list) Optional column headers; blanks auto-fill ("Header", "Header_1", ...).
+//   5) excelOptions   (bool, list)  Optional list: [0]=visible (default true), [1]=saveAfterWrite (default true),
+//                                 [2]=readOnly (default false).
+//   6) headers        (string, list) Optional column headers; blanks auto-fill ("Header", "Header_1", ...).
 //
 // OUTPUTS:
 //   0) msg            (string, item) Status message (replayed while idle).
@@ -68,9 +67,13 @@ namespace GhcETABSAPI
             p.AddTextParameter("path", "path", "Workbook path (.xlsx). Relative paths resolve against the plug-in directory.", GH_ParamAccess.item, "TreeExport.xlsx");
             p.AddTextParameter("ws", "ws", "Worksheet name. Created if missing.", GH_ParamAccess.item, "Sheet1");
             p.AddTextParameter("address", "address", "Starting Excel cell address (e.g., A1).", GH_ParamAccess.item, "A1");
-            p.AddBooleanParameter("visible", "visible", "Show Excel window after attaching/opening.", GH_ParamAccess.item, true);
-            p.AddBooleanParameter("saveAfterWrite", "save", "Save workbook after writing (ignored if read-only).", GH_ParamAccess.item, true);
-            p.AddBooleanParameter("readOnly", "readOnly", "Open workbook in read-only mode.", GH_ParamAccess.item, false);
+            int optionsIndex = p.AddBooleanParameter(
+                "excelOptions",
+                "excelOpt",
+                "Optional Excel toggles as a boolean list: [0]=visible (default true), [1]=saveAfterWrite (default true), [2]=readOnly (default false).",
+                GH_ParamAccess.list);
+            p[optionsIndex].Optional = true;
+
             int headerIndex = p.AddTextParameter(
                 "headers",
                 "headers",
@@ -104,16 +107,25 @@ namespace GhcETABSAPI
             bool visible = true;
             bool saveAfterWrite = true;
             bool readOnly = false;
+            var excelOptions = new List<bool>();
             var headerOverrides = new List<string>();
 
             da.GetDataTree(1, out tree);
             da.GetData(2, ref workbookPath);
             da.GetData(3, ref worksheetName);
             da.GetData(4, ref address);
-            da.GetData(5, ref visible);
-            da.GetData(6, ref saveAfterWrite);
-            da.GetData(7, ref readOnly);
-            da.GetDataList(8, headerOverrides);
+            da.GetDataList(5, excelOptions);
+            da.GetDataList(6, headerOverrides);
+
+            if (excelOptions != null)
+            {
+                if (excelOptions.Count > 0)
+                    visible = excelOptions[0];
+                if (excelOptions.Count > 1)
+                    saveAfterWrite = excelOptions[1];
+                if (excelOptions.Count > 2)
+                    readOnly = excelOptions[2];
+            }
 
             string message;
 
