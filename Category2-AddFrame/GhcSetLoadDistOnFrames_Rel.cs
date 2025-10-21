@@ -155,6 +155,7 @@ namespace GhcETABSAPI
                 List<string> failedPairs = new List<string>();
                 List<string> skippedPairs = new List<string>();
                 HashSet<string> skipSet = new HashSet<string>();
+                List<PreparedLoadAssignment> preparedLoads = new List<PreparedLoadAssignment>();
 
                 if (existingNames != null)
                 {
@@ -244,7 +245,8 @@ namespace GhcETABSAPI
                         d2 = tmp;
                     }
 
-                    int ret = sapModel.FrameObj.SetLoadDistributed(
+                    preparedLoads.Add(new PreparedLoadAssignment(
+                        i,
                         frameName,
                         pattern,
                         loadType,
@@ -254,19 +256,57 @@ namespace GhcETABSAPI
                         v1,
                         v2,
                         coordinateSystem,
-                        true,
-                        replaceFlag,
-                        (int)eItemType.Objects);
+                        replaceFlag));
+                }
 
-                    if (ret == 0)
+                int totalPrepared = preparedLoads.Count;
+                if (totalPrepared > 0)
+                {
+                    UiHelpers.ShowProgressBar(
+                        "Assign Frame Distributed Loads (Rel)",
+                        BuildProgressStatus(0, totalPrepared),
+                        totalPrepared);
+                }
+
+                try
+                {
+                    for (int j = 0; j < preparedLoads.Count; j++)
                     {
-                        assignedCount++;
+                        PreparedLoadAssignment prepared = preparedLoads[j];
+
+                        int ret = sapModel.FrameObj.SetLoadDistributed(
+                            prepared.FrameName,
+                            prepared.LoadPattern,
+                            prepared.LoadType,
+                            prepared.Direction,
+                            prepared.RelDist1,
+                            prepared.RelDist2,
+                            prepared.Value1,
+                            prepared.Value2,
+                            prepared.CoordinateSystem,
+                            true,
+                            prepared.ReplaceFlag,
+                            (int)eItemType.Objects);
+
+                        if (ret == 0)
+                        {
+                            assignedCount++;
+                        }
+                        else
+                        {
+                            failedCount++;
+                            failedPairs.Add($"{prepared.RowIndex}:{prepared.FrameName}");
+                        }
+
+                        UiHelpers.UpdateAssignmentProgressBar(
+                            assignedCount,
+                            totalPrepared,
+                            BuildProgressStatus(assignedCount, totalPrepared));
                     }
-                    else
-                    {
-                        failedCount++;
-                        failedPairs.Add($"{i}:{frameName}");
-                    }
+                }
+                finally
+                {
+                    UiHelpers.CloseProgressBar();
                 }
 
                 string summary = $"{Plural(assignedCount, "member")} successfully assigned, {Plural(failedCount, "member")} unsuccessful.";
@@ -297,6 +337,8 @@ namespace GhcETABSAPI
                 messages.Add(summary);
                 messages.Add("Error: " + ex.Message);
             }
+
+            UiHelpers.CloseProgressBar();
 
             da.SetDataList(0, messages);
 
@@ -406,6 +448,58 @@ namespace GhcETABSAPI
         private static string Plural(int count, string word)
         {
             return count == 1 ? $"{count} {word}" : $"{count} {word}s";
+        }
+
+        private static string BuildProgressStatus(int assignedCount, int totalPrepared)
+        {
+            if (totalPrepared <= 0)
+            {
+                return string.Empty;
+            }
+
+            double percent = (assignedCount / (double)totalPrepared) * 100.0;
+            return $"Assigned {assignedCount} of {totalPrepared} members ({percent:0.##}%).";
+        }
+
+        private sealed class PreparedLoadAssignment
+        {
+            internal PreparedLoadAssignment(
+                int rowIndex,
+                string frameName,
+                string loadPattern,
+                int loadType,
+                int direction,
+                double relDist1,
+                double relDist2,
+                double value1,
+                double value2,
+                string coordinateSystem,
+                bool replaceFlag)
+            {
+                RowIndex = rowIndex;
+                FrameName = frameName;
+                LoadPattern = loadPattern;
+                LoadType = loadType;
+                Direction = direction;
+                RelDist1 = relDist1;
+                RelDist2 = relDist2;
+                Value1 = value1;
+                Value2 = value2;
+                CoordinateSystem = coordinateSystem;
+                ReplaceFlag = replaceFlag;
+            }
+
+            internal int RowIndex { get; }
+            internal string FrameName { get; }
+            internal string LoadPattern { get; }
+            internal int LoadType { get; }
+            internal int Direction { get; }
+            internal double RelDist1 { get; }
+            internal double RelDist2 { get; }
+            internal double Value1 { get; }
+            internal double Value2 { get; }
+            internal string CoordinateSystem { get; }
+            internal bool ReplaceFlag { get; }
         }
     }
 }
