@@ -1,4 +1,31 @@
-﻿using System;
+﻿// -------------------------------------------------------------
+// Component : Get Frame Distributed Loads (per-object query)
+// Author    : Anh Bui
+// Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
+// Depends   : Grasshopper, ETABSv1 (COM)  [Embed Interop Types = False]
+// Panel     : "ETABS API" / "2.0 Frame Object Modelling"
+// GUID      : a1cfe4a7-9d49-42eb-aac9-774cdd7d1e84
+// -------------------------------------------------------------
+// Inputs (ordered):
+//   0) sapModel    (ETABSv1.cSapModel, item)  ETABS model from your Attach component.
+//   1) frameNames  (string, list)  Frame object names to query. Blank/dup ignored (case-insensitive).
+//   2) loadPattern (string, list)  OPTIONAL filters. If UNCONNECTED or empty → treated as null (no filter).
+//
+// Outputs:
+//   0) header  (text, tree)   Single branch of column labels.
+//   1) values  (generic, tree) Column-wise branches (0..10) aligned to header order.
+//   2) msg     (text, item)   Status / diagnostics.
+//
+// Behavior Notes:
+//   • frameNames are trimmed and de-duplicated (OrdinalIgnoreCase).
+//   • loadPattern is OPTIONAL; null ⇒ return all patterns; when provided, filter is case-insensitive.
+//   • Values tree is column-oriented to match header labels:
+//       [0] FrameName, [1] LoadPattern, [2] Type, [3] CoordinateSystem, [4] Direction,
+//       [5] RelDist1, [6] RelDist2, [7] Dist1, [8] Dist2, [9] Value1, [10] Value2.
+//   • Uses per-object mode: FrameObj.GetLoadDistributed(..., eItemType.Objects).
+// -------------------------------------------------------------
+
+using System;
 using System.Collections.Generic;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
