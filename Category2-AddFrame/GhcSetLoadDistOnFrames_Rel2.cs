@@ -36,6 +36,7 @@ using ETABSv1;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
+using static GhcETABSAPI.ComponentShared;
 using Excel = Microsoft.Office.Interop.Excel;
 
 namespace GhcETABSAPI
@@ -1085,70 +1086,6 @@ namespace GhcETABSAPI
                 }
 
                 return length;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static string Plural(int count, string word)
-        {
-            return count == 1 ? $"{count} {word}" : $"{count} {word}s";
-        }
-
-        private static void EnsureModelUnlocked(cSapModel model)
-        {
-            if (model == null)
-            {
-                return;
-            }
-
-            try
-            {
-                bool isLocked = model.GetModelIsLocked();
-                if (isLocked)
-                {
-                    model.SetModelIsLocked(false);
-                }
-            }
-            catch
-            {
-                // ignored
-            }
-        }
-
-        private static HashSet<string> TryGetExistingFrameNames(cSapModel model)
-        {
-            if (model == null)
-            {
-                return null;
-            }
-
-            try
-            {
-                int count = 0;
-                string[] names = null;
-                int ret = model.FrameObj.GetNameList(ref count, ref names);
-                if (ret != 0)
-                {
-                    return null;
-                }
-
-                HashSet<string> result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (names != null)
-                {
-                    for (int i = 0; i < names.Length; i++)
-                    {
-                        string nm = names[i];
-                        if (!string.IsNullOrWhiteSpace(nm))
-                        {
-                            result.Add(nm.Trim());
-                        }
-                    }
-                }
-
-                return result;
             }
             catch
             {

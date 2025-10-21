@@ -36,6 +36,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using ETABSv1;
 using Grasshopper.Kernel;
+using static GhcETABSAPI.ComponentShared;
 
 namespace GhcETABSAPI
 {
