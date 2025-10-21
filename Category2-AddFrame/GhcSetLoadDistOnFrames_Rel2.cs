@@ -355,9 +355,8 @@ namespace GhcETABSAPI
                 excelData.Dist1[i] = absDist1;
                 excelData.Dist2[i] = absDist2;
 
-                string coordinateSystem = !string.IsNullOrEmpty(coordinateOverride)
-                    ? coordinateOverride
-                    : ResolveDirectionReference(direction);
+                string coordinateSystem = ResolveCoordinateSystem(coordinateOverride, direction);
+                excelData.CoordinateSystem[i] = coordinateSystem;
 
                 prepared.Add(new PreparedLoadAssignment(
                     i,
@@ -826,6 +825,47 @@ namespace GhcETABSAPI
         private static string ResolveDirectionReference(int direction)
         {
             return Math.Abs(direction) < 10 ? "Local" : "Global";
+        }
+
+        private static string ResolveCoordinateSystem(string coordinateSystem, int direction)
+        {
+            string directionReference = ResolveDirectionReference(direction);
+
+            if (string.IsNullOrWhiteSpace(coordinateSystem))
+            {
+                return directionReference;
+            }
+
+            string trimmed = coordinateSystem.Trim();
+
+            if (string.Equals(trimmed, directionReference, StringComparison.OrdinalIgnoreCase))
+            {
+                return directionReference;
+            }
+
+            if (string.Equals(trimmed, "Local", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Local";
+            }
+
+            if (string.Equals(trimmed, "Global", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Global";
+            }
+
+            if (directionReference.Equals("Local", StringComparison.OrdinalIgnoreCase) &&
+                trimmed.StartsWith("Local", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Local";
+            }
+
+            if (directionReference.Equals("Global", StringComparison.OrdinalIgnoreCase) &&
+                trimmed.StartsWith("Global", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Global";
+            }
+
+            return trimmed;
         }
 
         private static bool IsInvalidNumber(double value)
