@@ -261,8 +261,8 @@ namespace GhcETABSAPI
             {
                 string areaName = TrimOrEmpty(excelData.AreaName[i]);
                 string loadPattern = TrimOrEmpty(excelData.LoadPattern[i]);
-                int? rawDirection = excelData.Direction[i];
                 string coordinateSystem = TrimOrEmpty(excelData.CoordinateSystem[i]);
+                int? rawDirection = excelData.Direction[i];
                 double? rawValue = excelData.Value[i];
 
                 if (string.IsNullOrEmpty(areaName) || string.IsNullOrEmpty(loadPattern) || !rawDirection.HasValue || !rawValue.HasValue)
@@ -285,8 +285,8 @@ namespace GhcETABSAPI
 
                 excelData.AreaName[i] = areaName;
                 excelData.LoadPattern[i] = loadPattern;
-                excelData.Direction[i] = direction;
                 excelData.CoordinateSystem[i] = resolvedCoordinate;
+                excelData.Direction[i] = direction;
                 excelData.Value[i] = value;
 
                 if (existingNames != null && !existingNames.Contains(areaName))
@@ -355,8 +355,8 @@ namespace GhcETABSAPI
                 {
                     "AreaName",
                     "LoadPattern",
-                    "Direction",
                     "CoordinateSystem",
+                    "Direction",
                     "Value"
                 };
 
@@ -436,8 +436,8 @@ namespace GhcETABSAPI
 
                     data.AreaName.Add(TrimOrEmpty(rowValues[0]));
                     data.LoadPattern.Add(TrimOrEmpty(rowValues[1]));
-                    data.Direction.Add(ParseNullableInt(rowValues[2]));
-                    data.CoordinateSystem.Add(TrimOrEmpty(rowValues[3]));
+                    data.CoordinateSystem.Add(TrimOrEmpty(rowValues[2]));
+                    data.Direction.Add(ParseNullableInt(rowValues[3]));
                     data.Value.Add(ParseNullableDouble(rowValues[4]));
                 }
 
@@ -509,8 +509,8 @@ namespace GhcETABSAPI
 
             AppendBranch(tree, 0, data.AreaName);
             AppendBranch(tree, 1, data.LoadPattern);
-            AppendBranch(tree, 2, data.Direction);
-            AppendBranch(tree, 3, data.CoordinateSystem);
+            AppendBranch(tree, 2, data.CoordinateSystem);
+            AppendBranch(tree, 3, data.Direction);
             AppendBranch(tree, 4, data.Value);
 
             return tree;
@@ -732,8 +732,8 @@ namespace GhcETABSAPI
         public List<string> Headers { get; } = new List<string>();
         public List<string> AreaName { get; } = new List<string>();
         public List<string> LoadPattern { get; } = new List<string>();
-        public List<int?> Direction { get; } = new List<int?>();
         public List<string> CoordinateSystem { get; } = new List<string>();
+        public List<int?> Direction { get; } = new List<int?>();
         public List<double?> Value { get; } = new List<double?>();
 
         public int RowCount => AreaName.Count;
