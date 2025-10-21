@@ -44,7 +44,6 @@ namespace GhcETABSAPI
     {
         private bool lastAdd = false;
         private string lastMsg = "Idle.";
-        private string initPath = null; // default to plugin dir
 
         private const string DefaultHeaderBase = "Header";
 

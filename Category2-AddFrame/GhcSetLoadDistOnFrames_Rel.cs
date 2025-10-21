@@ -315,8 +315,9 @@ namespace GhcETABSAPI
             try
             {
                 bool isLocked = false;
-                int ret = model.GetModelIsLocked(ref isLocked);
-                if (ret == 0 && isLocked)
+
+                isLocked = model.GetModelIsLocked();
+                if (isLocked)
                 {
                     model.SetModelIsLocked(false);
                 }
