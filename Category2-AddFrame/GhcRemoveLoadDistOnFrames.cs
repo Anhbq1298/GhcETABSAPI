@@ -166,10 +166,18 @@ namespace GhcETABSAPI
 
                     bool anyTargetOnFrame = false;
 
+                    HashSet<string> processedPatterns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
                     foreach (DistributedLoadEntry entry in loadResult.entries)
                     {
-                        bool matches = patternSet == null || patternSet.Contains(entry.LoadPattern);
+                        string entryPattern = entry.LoadPattern ?? string.Empty;
+                        bool matches = patternSet == null || patternSet.Contains(entryPattern);
                         if (!matches)
+                        {
+                            continue;
+                        }
+
+                        if (!processedPatterns.Add(entryPattern))
                         {
                             continue;
                         }
@@ -177,7 +185,7 @@ namespace GhcETABSAPI
                         anyTargetOnFrame = true;
                         targetedLoads++;
 
-                        if (TryDeleteLoad(sapModel, entry))
+                        if (TryDeleteLoad(sapModel, frameName, entryPattern))
                         {
                             removedLoads++;
                             framesModified.Add(frameName);
@@ -375,61 +383,21 @@ namespace GhcETABSAPI
             }
         }
 
-        private static bool TryDeleteLoad(cSapModel model, DistributedLoadEntry entry)
+        private static bool TryDeleteLoad(cSapModel model, string frameName, string loadPattern)
         {
-            if (model == null || entry == null)
+            if (model == null)
             {
                 return false;
             }
 
-            string frameName = entry.FrameName ?? string.Empty;
-            string loadPattern = entry.LoadPattern ?? string.Empty;
-            string cSys = string.IsNullOrWhiteSpace(entry.CoordinateSystem) ? "Global" : entry.CoordinateSystem.Trim();
-            int loadType = entry.LoadType;
-            int direction = entry.Direction;
-
-            double rel1 = entry.RelDist1;
-            double rel2 = entry.RelDist2;
-            double abs1 = entry.Dist1;
-            double abs2 = entry.Dist2;
-
             try
             {
-                int retRel = model.FrameObj.DeleteLoadDistributed(
-                    frameName,
-                    loadPattern,
-                    loadType,
-                    direction,
-                    rel1,
-                    rel2,
-                    cSys,
-                    true,
-                    (int)eItemType.Objects);
+                int ret = model.FrameObj.DeleteLoadDistributed(
+                    frameName ?? string.Empty,
+                    loadPattern ?? string.Empty,
+                    eItemType.Objects);
 
-                if (retRel == 0)
-                {
-                    return true;
-                }
-            }
-            catch
-            {
-                // ignored
-            }
-
-            try
-            {
-                int retAbs = model.FrameObj.DeleteLoadDistributed(
-                    frameName,
-                    loadPattern,
-                    loadType,
-                    direction,
-                    abs1,
-                    abs2,
-                    cSys,
-                    false,
-                    (int)eItemType.Objects);
-
-                return retAbs == 0;
+                return ret == 0;
             }
             catch
             {
