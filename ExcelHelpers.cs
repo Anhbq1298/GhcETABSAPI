@@ -72,17 +72,23 @@ namespace GhcETABSAPI
                 app = null;
                 wb = null;
 
-                // Resolve input path (fallback to default template when not provided)
-                string requestedPath = string.IsNullOrWhiteSpace(filePathOrRelative)
-                    ? _defaultTemplateRelativePath
-                    : filePathOrRelative;
+                bool createTemporaryWorkbook = filePathOrRelative == null;
 
-                // Resolve full path and validate existence
-                string path = ProjectRelative(requestedPath);
-                if (string.IsNullOrWhiteSpace(path)) return false;
+                string fullPath = null;
+                if (!createTemporaryWorkbook)
+                {
+                    // Resolve input path (fallback to default template when not provided)
+                    string requestedPath = string.IsNullOrWhiteSpace(filePathOrRelative)
+                        ? _defaultTemplateRelativePath
+                        : filePathOrRelative;
 
-                string fullPath = Path.GetFullPath(path);
-                if (!File.Exists(fullPath)) return false;
+                    // Resolve full path and validate existence
+                    string path = ProjectRelative(requestedPath);
+                    if (string.IsNullOrWhiteSpace(path)) return false;
+
+                    fullPath = Path.GetFullPath(path);
+                    if (!File.Exists(fullPath)) return false;
+                }
 
                 // 0) Close any running Excel for clean start
                 var running = TryGetRunningExcelApplication();
@@ -104,17 +110,51 @@ namespace GhcETABSAPI
 
                     try
                     {
-                        wb = app.Workbooks.Open(
-                            Filename: fullPath,
-                            UpdateLinks: 0,
-                            ReadOnly: readOnly,
-                            IgnoreReadOnlyRecommended: true,
-                            AddToMru: false
-                        );
+                        if (createTemporaryWorkbook)
+                        {
+                            wb = app.Workbooks.Add(Type.Missing);
+
+                            string tempDirectory = Path.GetTempPath();
+                            string tempFileName = "temp.xlsx";
+                            string tempFullPath = Path.Combine(tempDirectory, tempFileName);
+
+                            try
+                            {
+                                if (File.Exists(tempFullPath)) File.Delete(tempFullPath);
+                            }
+                            catch { }
+
+                            wb.SaveAs(tempFullPath, Excel.XlFileFormat.xlOpenXMLWorkbook);
+                            try
+                            {
+                                Excel.Window window = null;
+                                try
+                                {
+                                    window = app.ActiveWindow;
+                                    if (window != null)
+                                        window.Caption = "temp";
+                                }
+                                finally
+                                {
+                                    if (window != null) ReleaseCom(window);
+                                }
+                            }
+                            catch { }
+                        }
+                        else
+                        {
+                            wb = app.Workbooks.Open(
+                                Filename: fullPath,
+                                UpdateLinks: 0,
+                                ReadOnly: readOnly,
+                                IgnoreReadOnlyRecommended: true,
+                                AddToMru: false
+                            );
+                        }
                     }
                     catch
                     {
-                        if (!readOnly)
+                        if (!readOnly && !createTemporaryWorkbook)
                         {
                             wb = app.Workbooks.Open(
                                 Filename: fullPath,
