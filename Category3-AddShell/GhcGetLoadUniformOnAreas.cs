@@ -59,7 +59,7 @@ namespace GhcETABSAPI
                 "GetAreaLoads",
                 "Query uniform surface loads assigned to ETABS area objects (per object mode).",
                 "ETABS API",
-                "3.0 Shell (Area) Object Modelling")
+                "3.0 Area Object Modelling"  )
         {
         }
 
