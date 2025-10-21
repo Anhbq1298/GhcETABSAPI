@@ -356,9 +356,8 @@ namespace GhcETABSAPI
                 excelData.Dist1[i] = absDist1;
                 excelData.Dist2[i] = absDist2;
 
-                string coordinateSystem = !string.IsNullOrEmpty(coordinateOverride)
-                    ? coordinateOverride
-                    : ResolveDirectionReference(direction);
+                string coordinateSystem = ResolveCoordinateSystem(coordinateOverride, direction);
+                excelData.CoordinateSystem[i] = coordinateSystem;
 
                 prepared.Add(new PreparedLoadAssignment(
                     i,
@@ -805,6 +804,54 @@ namespace GhcETABSAPI
         private static int NormalizeLoadType(int loadType)
         {
             return loadType == 2 ? 2 : 1;
+        }
+
+        private static double Clamp01(double value)
+        {
+            if (value < 0.0) return 0.0;
+            if (value > 1.0) return 1.0;
+            return value;
+        }
+
+        private static int ClampDirCode(int dirCode)
+        {
+            if (dirCode < 1 || dirCode > 11)
+            {
+                return 10;
+            }
+
+            return dirCode;
+        }
+
+        private static string ResolveCoordinateSystem(string coordinateSystem, int direction)
+        {
+            string directionReference = Math.Abs(direction) < 10 ? "Local" : "Global";
+
+            if (string.IsNullOrWhiteSpace(coordinateSystem))
+            {
+                return directionReference;
+            }
+
+            string trimmed = coordinateSystem.Trim();
+
+            if (string.Equals(trimmed, "Local", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("Local", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Local";
+            }
+
+            if (string.Equals(trimmed, "Global", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("Global", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Global";
+            }
+
+            return directionReference;
+        }
+
+        private static bool IsInvalidNumber(double value)
+        {
+            return double.IsNaN(value) || double.IsInfinity(value);
         }
 
         private static bool TryResolveDistances(
