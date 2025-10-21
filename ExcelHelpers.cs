@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Excel = Microsoft.Office.Interop.Excel;
 using Microsoft.CSharp.RuntimeBinder;
@@ -80,9 +81,7 @@ namespace GhcETABSAPI
                 string fullPath = Path.GetFullPath(path);
 
                 // 0) Try to attach to any running Excel instance
-                Excel.Application runningApp = null;
-                try { runningApp = Interaction.GetObject(null, "Excel.Application") as Excel.Application; }
-                catch { runningApp = null; }
+                Excel.Application runningApp = TryGetRunningExcelApplication();
 
                 // 1) If Excel is running, see if the target workbook is already open there
                 if (runningApp != null)
@@ -190,6 +189,54 @@ namespace GhcETABSAPI
 
                 return createdApplication; // true if we spawned a new Excel.exe, else false
             }
+        }
+
+        private static Excel.Application TryGetRunningExcelApplication()
+        {
+            Excel.Application result = null;
+            Exception capturedError = null;
+
+            void Probe()
+            {
+                try
+                {
+                    // Interaction.GetObject works even when Excel is exposed only through VBA-style automation servers.
+                    object candidate = Interaction.GetObject(string.Empty, "Excel.Application");
+                    result = candidate as Excel.Application;
+                }
+                catch (COMException ex)
+                {
+                    capturedError = ex;
+                    result = null;
+                }
+                catch (Exception ex)
+                {
+                    capturedError = ex;
+                    result = null;
+                }
+            }
+
+            if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
+            {
+                Probe();
+            }
+            else
+            {
+                var probeThread = new Thread(Probe)
+                {
+                    IsBackground = true
+                };
+                probeThread.SetApartmentState(ApartmentState.STA);
+                probeThread.Start();
+                probeThread.Join();
+            }
+
+            if (result == null && capturedError != null)
+            {
+                System.Diagnostics.Debug.WriteLine($"Unable to attach to running Excel instance: {capturedError}");
+            }
+
+            return result;
         }
 
         /// <summary>
