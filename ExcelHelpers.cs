@@ -61,31 +61,30 @@ namespace GhcETABSAPI
         /// Returns true if a new Excel Application was created by this method.
         /// </summary>
         internal static bool AttachOrOpenWorkbook(
-            out Excel.Application app,
-            out Excel.Workbook wb,
-            string filePathOrRelative,
-            bool visible = true,
-            bool readOnly = false)
+          out Excel.Application app,
+          out Excel.Workbook wb,
+          string filePathOrRelative,
+          bool visible = true,
+          bool readOnly = false)
         {
             lock (_excelLock)
             {
                 app = null;
                 wb = null;
+
                 bool createdApplication = false;
 
+                // Resolve and validate path
                 string path = ProjectRelative(filePathOrRelative);
                 if (string.IsNullOrWhiteSpace(path)) return false;
-
                 string fullPath = Path.GetFullPath(path);
 
+                // 0) Try to attach to any running Excel instance
                 Excel.Application runningApp = null;
-                try
-                {
-                    runningApp = Marshal.GetActiveObject("Excel.Application") as Excel.Application;
-                }
+                try { runningApp = Interaction.GetObject(null, "Excel.Application") as Excel.Application; }
                 catch { runningApp = null; }
 
-                // 1) Try to find workbook in an existing Excel instance
+                // 1) If Excel is running, see if the target workbook is already open there
                 if (runningApp != null)
                 {
                     try
@@ -93,10 +92,9 @@ namespace GhcETABSAPI
                         foreach (Excel.Workbook candidate in runningApp.Workbooks)
                         {
                             if (candidate == null) continue;
-                            string candidatePath = null;
-                            try { candidatePath = candidate.FullName; }
-                            catch { candidatePath = null; }
 
+                            string candidatePath = null;
+                            try { candidatePath = candidate.FullName; } catch { candidatePath = null; }
                             if (string.IsNullOrWhiteSpace(candidatePath)) continue;
 
                             string candidateFullPath;
@@ -105,74 +103,92 @@ namespace GhcETABSAPI
 
                             if (string.Equals(candidateFullPath, fullPath, StringComparison.OrdinalIgnoreCase))
                             {
-                                wb = candidate;
+                                // Found an already open workbook → attach and return (DO NOT open again)
                                 app = runningApp;
-                                break;
+                                wb = candidate;
+
+                                try
+                                {
+                                    if (visible) { app.Visible = true; app.UserControl = true; }
+                                    wb.Activate();
+                                }
+                                catch { /* no-op */ }
+
+                                return false; // did not create a new Excel application
                             }
                         }
                     }
-                    catch { wb = null; app = null; }
+                    catch { /* ignore and continue to open below */ }
                 }
 
-                // 2) Try bind to an *already-open* workbook by FILE (no Excel option changes)
-                if (wb == null || app == null)
+                // 2) No open copy found → reuse running Excel or create a new instance
+                if (runningApp != null)
                 {
-                    try
-                    {
-                        if (File.Exists(fullPath))
-                        {
-                            var obj = Interaction.GetObject(fullPath);    // attaches if that workbook is open
-                            wb = obj as Excel.Workbook;                   // OR starts Excel & opens file if not already open
-                            if (wb != null) app = wb.Application;
-                        }
-                    }
-                    catch
-                    {
-                        wb = null; app = null; // ignore and fall through
-                    }
+                    app = runningApp;
+                }
+                else
+                {
+                    app = new Excel.Application();
+                    createdApplication = true;
                 }
 
-                // 3) If still not bound, reuse running instance or create a new one
-                if (wb == null || app == null)
+                // 3) Open the workbook (avoid prompts & read-only recommendation)
+                //    NOTE: if the file doesn’t exist, this will throw; handle as you prefer.
+                try
                 {
-                    if (runningApp != null)
+                    wb = app.Workbooks.Open(
+                        Filename: fullPath,
+                        UpdateLinks: 0,
+                        ReadOnly: readOnly,
+                        IgnoreReadOnlyRecommended: true,
+                        AddToMru: false
+                    );
+                }
+                catch
+                {
+                    // Optional fallback: if not explicitly readOnly and open failed (e.g., locked),
+                    // try opening as read-only once.
+                    if (!readOnly)
                     {
-                        app = runningApp;
-                    }
-                    else
-                    {
-                        app = new Excel.Application();
-                        createdApplication = true;
                         try
                         {
-                            app.Visible = visible;
-                            if (visible) app.UserControl = true;
+                            wb = app.Workbooks.Open(
+                                Filename: fullPath,
+                                UpdateLinks: 0,
+                                ReadOnly: true,
+                                IgnoreReadOnlyRecommended: true,
+                                AddToMru: false
+                            );
                         }
-                        catch { }
-                    }
-
-                    if (File.Exists(fullPath))
-                    {
-                        wb = app.Workbooks.Open(fullPath, ReadOnly: readOnly);
+                        catch
+                        {
+                            // Clean up partially created app if we made it
+                            try { if (createdApplication) app.Quit(); } catch { }
+                            try { ReleaseCom(wb); } catch { }
+                            try { ReleaseCom(app); } catch { }
+                            wb = null; app = null;
+                            return false;
+                        }
                     }
                     else
                     {
-                        string dir = Path.GetDirectoryName(fullPath);
-                        if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
-                        {
-                            try { Directory.CreateDirectory(dir); } catch { }
-                        }
-
-                        wb = app.Workbooks.Add();
-                        try { wb.SaveAs(fullPath, Excel.XlFileFormat.xlOpenXMLWorkbook); } catch { }
+                        try { if (createdApplication) app.Quit(); } catch { }
+                        try { ReleaseCom(wb); } catch { }
+                        try { ReleaseCom(app); } catch { }
+                        wb = null; app = null;
+                        return false;
                     }
                 }
 
-                // 4) Finish
-                try { if (visible) app.Visible = true; } catch { }
-                try { wb.Activate(); } catch { }
+                // 4) Final UI touches
+                try
+                {
+                    if (visible) { app.Visible = true; app.UserControl = true; }
+                    wb.Activate();
+                }
+                catch { /* no-op */ }
 
-                return createdApplication;
+                return createdApplication; // true if we spawned a new Excel.exe, else false
             }
         }
 
