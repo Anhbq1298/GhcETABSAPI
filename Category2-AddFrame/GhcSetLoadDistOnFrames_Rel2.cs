@@ -357,7 +357,7 @@ namespace GhcETABSAPI
 
                 string coordinateSystem = !string.IsNullOrEmpty(coordinateOverride)
                     ? coordinateOverride
-                    : ((direction >= 1 && direction <= 3) ? "Local" : "Global");
+                    : ResolveDirectionReference(direction);
 
                 prepared.Add(new PreparedLoadAssignment(
                     i,
@@ -821,6 +821,11 @@ namespace GhcETABSAPI
             }
 
             return dirCode;
+        }
+
+        private static string ResolveDirectionReference(int direction)
+        {
+            return Math.Abs(direction) < 10 ? "Local" : "Global";
         }
 
         private static bool IsInvalidNumber(double value)

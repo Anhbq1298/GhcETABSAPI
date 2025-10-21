@@ -136,7 +136,7 @@ namespace GhcETABSAPI
 
                 int loadType = (myType == 2) ? 2 : 1;
                 int direction = ClampDirCode(dirCode);
-                string coordinateSystem = (direction >= 1 && direction <= 3) ? "Local" : "Global";
+                string coordinateSystem = ResolveDirectionReference(direction);
                 bool replaceFlag = replaceMode;
 
                 int frameCount = frameNames.Count;
@@ -381,6 +381,11 @@ namespace GhcETABSAPI
             }
 
             return dirCode;
+        }
+
+        private static string ResolveDirectionReference(int direction)
+        {
+            return Math.Abs(direction) < 10 ? "Local" : "Global";
         }
 
         private static bool IsInvalidNumber(double value)
