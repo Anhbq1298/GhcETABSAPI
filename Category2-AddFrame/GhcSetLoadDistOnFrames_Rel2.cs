@@ -547,7 +547,7 @@ namespace GhcETABSAPI
         {
             if (value == null)
             {
-                return null;
+                return 0;
             }
 
             if (value is double d)
@@ -573,7 +573,7 @@ namespace GhcETABSAPI
         {
             if (value == null)
             {
-                return null;
+                return 0;
             }
 
             if (value is double d)
