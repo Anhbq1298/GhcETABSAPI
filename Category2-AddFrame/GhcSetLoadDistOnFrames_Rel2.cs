@@ -822,14 +822,9 @@ namespace GhcETABSAPI
             return dirCode;
         }
 
-        private static string ResolveDirectionReference(int direction)
-        {
-            return Math.Abs(direction) < 10 ? "Local" : "Global";
-        }
-
         private static string ResolveCoordinateSystem(string coordinateSystem, int direction)
         {
-            string directionReference = ResolveDirectionReference(direction);
+            string directionReference = Math.Abs(direction) < 10 ? "Local" : "Global";
 
             if (string.IsNullOrWhiteSpace(coordinateSystem))
             {
