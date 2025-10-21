@@ -124,7 +124,17 @@ namespace GhcETABSAPI
                     sheetName = "Assigned Loads On Frames";
                 }
 
-                ExcelLoadData excelData = ReadExcelSheet(fullPath, sheetName);
+                UiHelpers.ShowDualProgressBar(
+                    "Assign Frame Distributed Loads",
+                    "Reading Excel...",
+                    0,
+                    string.Empty,
+                    0);
+
+                ExcelLoadData excelData = ReadExcelSheet(
+                    fullPath,
+                    sheetName,
+                    (current, maximum, status) => UiHelpers.UpdateExcelProgressBar(current, maximum, status));
                 valueTree = BuildValueTree(excelData);
 
                 if (excelData.RowCount == 0)
@@ -151,11 +161,10 @@ namespace GhcETABSAPI
                         ref failedCount);
 
                     int totalPrepared = preparedLoads.Count;
-                    if (totalPrepared > 0)
-                    {
-                        string initialStatus = BuildProgressStatus(0, totalPrepared);
-                        UiHelpers.ShowProgressBar("Assign Frame Distributed Loads", initialStatus, totalPrepared);
-                    }
+                    UiHelpers.UpdateAssignmentProgressBar(
+                        0,
+                        totalPrepared,
+                        BuildProgressStatus(0, totalPrepared));
 
                     try
                     {
@@ -180,7 +189,7 @@ namespace GhcETABSAPI
                             if (ret == 0)
                             {
                                 assignedCount++;
-                                UiHelpers.UpdateProgressBar(
+                                UiHelpers.UpdateAssignmentProgressBar(
                                     assignedCount,
                                     totalPrepared,
                                     BuildProgressStatus(assignedCount, totalPrepared));
@@ -189,20 +198,17 @@ namespace GhcETABSAPI
                             {
                                 failedCount++;
                                 failedPairs.Add($"{prepared.RowIndex}:{prepared.FrameName}");
-                                UiHelpers.UpdateProgressBar(
+                                UiHelpers.UpdateAssignmentProgressBar(
                                     assignedCount,
                                     totalPrepared,
                                     BuildProgressStatus(assignedCount, totalPrepared));
                             }
                         }
 
-                        if (totalPrepared > 0)
-                        {
-                            UiHelpers.UpdateProgressBar(
-                                assignedCount,
-                                totalPrepared,
-                                BuildProgressStatus(assignedCount, totalPrepared));
-                        }
+                        UiHelpers.UpdateAssignmentProgressBar(
+                            assignedCount,
+                            totalPrepared,
+                            BuildProgressStatus(assignedCount, totalPrepared));
                     }
                     finally
                     {
@@ -235,6 +241,8 @@ namespace GhcETABSAPI
             {
                 messages.Add("Error: " + ex.Message);
             }
+
+            UiHelpers.CloseProgressBar();
 
             da.SetDataTree(0, valueTree);
             da.SetDataList(1, messages.ToArray());
@@ -338,6 +346,28 @@ namespace GhcETABSAPI
             return $"Assigned {assignedCount} of {totalPrepared} members ({percent:0.##}%).";
         }
 
+        private static string BuildExcelProgressStatus(int processedRows, int totalRows)
+        {
+            int safeProcessed = Math.Max(0, processedRows);
+            int safeTotal = Math.Max(0, totalRows);
+            if (safeTotal <= 0)
+            {
+                return $"Reading Excel ({safeProcessed})";
+            }
+
+            int clamped = Math.Min(safeProcessed, safeTotal);
+            double percent = (clamped / (double)safeTotal) * 100.0;
+            return $"Reading Excel {clamped} of {safeTotal} rows ({percent:0.##}%).";
+        }
+
+        private static string BuildExcelDoneStatus(int rowCount)
+        {
+            int safeCount = Math.Max(0, rowCount);
+            return safeCount == 1
+                ? "Excel Done (1 row)"
+                : $"Excel Done ({safeCount} rows)";
+        }
+
         private readonly struct PreparedLoadAssignment
         {
             internal PreparedLoadAssignment(
@@ -376,7 +406,10 @@ namespace GhcETABSAPI
             internal string CoordinateSystem { get; }
         }
 
-        private static ExcelLoadData ReadExcelSheet(string fullPath, string sheetName)
+        private static ExcelLoadData ReadExcelSheet(
+            string fullPath,
+            string sheetName,
+            Action<int, int, string> progressCallback = null)
         {
             Excel.Application app = null;
             Excel.Workbooks books = null;
@@ -470,6 +503,11 @@ namespace GhcETABSAPI
                     }
                 }
 
+                int totalRows = Math.Max(0, lastRow - 1);
+                progressCallback?.Invoke(0, totalRows, BuildExcelProgressStatus(0, totalRows));
+
+                int processedRows = 0;
+
                 for (int row = 2; row <= lastRow; row++)
                 {
                     object[] rowValues = new object[columnCount];
@@ -494,6 +532,10 @@ namespace GhcETABSAPI
                         }
                     }
 
+                    processedRows++;
+                    int current = totalRows > 0 ? Math.Min(processedRows, totalRows) : processedRows;
+                    progressCallback?.Invoke(current, totalRows, BuildExcelProgressStatus(current, totalRows));
+
                     if (!hasData)
                     {
                         continue;
@@ -511,6 +553,8 @@ namespace GhcETABSAPI
                     data.Value1.Add(ParseNullableDouble(rowValues[9]));
                     data.Value2.Add(ParseNullableDouble(rowValues[10]));
                 }
+
+                progressCallback?.Invoke(data.RowCount, data.RowCount, BuildExcelDoneStatus(data.RowCount));
 
                 return data;
             }
