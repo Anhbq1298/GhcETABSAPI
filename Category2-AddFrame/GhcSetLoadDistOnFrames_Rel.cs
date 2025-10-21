@@ -39,12 +39,12 @@ using Grasshopper.Kernel;
 
 namespace GhcETABSAPI
 {
-    public class GhcSetLoadDistOnFrames : GH_Component
+    public class GhcSetLoadDistOnFrames_Rel : GH_Component
     {
         private bool _lastRun;
         private readonly List<string> _lastMessages = new List<string> { "No previous run. Toggle 'run' to assign." };
 
-        public GhcSetLoadDistOnFrames()
+        public GhcSetLoadDistOnFrames_Rel()
           : base(
                 "Set Frame Distributed Loads (Rel)",
                 "SetFrameUDLRel",
