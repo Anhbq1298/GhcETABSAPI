@@ -261,11 +261,8 @@ namespace GhcETABSAPI
                 for (int i = 0; i < n; i++)
                 {
                     string resolvedAreaName = areaName[i];
-                    string rawCoordinate = cSys[i];
                     int direction = dir[i];
-                    string resolvedCoordinate = string.IsNullOrWhiteSpace(rawCoordinate)
-                        ? ComponentShared.ResolveDirectionReference(direction)
-                        : rawCoordinate;
+                    string resolvedCoordinate = ComponentShared.ResolveDirectionReference(direction);
 
                     areaNameOut.Add(resolvedAreaName);
                     loadPatOut.Add(loadPat[i]);
