@@ -1,17 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using Excel = Microsoft.Office.Interop.Excel;
-using Microsoft.CSharp.RuntimeBinder;
 using Microsoft.VisualBasic;
-
-
 
 namespace GhcETABSAPI
 {
@@ -19,7 +16,6 @@ namespace GhcETABSAPI
     {
         // Prevent overlapping COM calls in multi-threaded contexts
         private static readonly object _excelLock = new object();
-
 
         /// <summary>
         /// Convert a relative path to full path using AppDomain.BaseDirectory.
@@ -56,100 +52,61 @@ namespace GhcETABSAPI
         }
 
         /// <summary>
-        /// Attach to a running Excel instance and bind to the target workbook if it is already open.
-        /// Otherwise, open the workbook from the provided path, creating a new .xlsx if the file does not exist.
-        /// ALWAYS activates the workbook before returning. If 'visible' is true, Excel will be shown even when attaching.
-        /// Returns true if a new Excel Application was created by this method.
+        /// Force-restart Excel: if a running instance exists, close it completely (discard unsaved),
+        /// then start a fresh Excel instance and open the workbook at 'filePathOrRelative'.
+        /// Returns true if a new Excel Application was created (always true on success with this strategy).
         /// </summary>
         internal static bool AttachOrOpenWorkbook(
-          out Excel.Application app,
-          out Excel.Workbook wb,
-          string filePathOrRelative,
-          bool visible = true,
-          bool readOnly = false)
+            out Excel.Application app,
+            out Excel.Workbook wb,
+            string filePathOrRelative,
+            bool visible = true,
+            bool readOnly = false)
         {
             lock (_excelLock)
             {
                 app = null;
                 wb = null;
 
-                bool createdApplication = false;
-
-                // Resolve and validate path
+                // Resolve full path and validate existence (avoid Excel popups)
                 string path = ProjectRelative(filePathOrRelative);
                 if (string.IsNullOrWhiteSpace(path)) return false;
+
                 string fullPath = Path.GetFullPath(path);
+                if (!File.Exists(fullPath)) return false;
 
-                // 0) Try to attach to any running Excel instance
-                Excel.Application runningApp = TryGetRunningExcelApplication();
-
-                // 1) If Excel is running, see if the target workbook is already open there
-                if (runningApp != null)
+                // 0) If an Excel instance is running, close it completely to start clean.
+                var running = TryGetRunningExcelApplication();
+                if (running != null)
                 {
-                    try
-                    {
-                        foreach (Excel.Workbook candidate in runningApp.Workbooks)
-                        {
-                            if (candidate == null) continue;
-
-                            string candidatePath = null;
-                            try { candidatePath = candidate.FullName; } catch { candidatePath = null; }
-                            if (string.IsNullOrWhiteSpace(candidatePath)) continue;
-
-                            string candidateFullPath;
-                            try { candidateFullPath = Path.GetFullPath(candidatePath); }
-                            catch { candidateFullPath = candidatePath; }
-
-                            if (string.Equals(candidateFullPath, fullPath, StringComparison.OrdinalIgnoreCase))
-                            {
-                                // Found an already open workbook → attach and return (DO NOT open again)
-                                app = runningApp;
-                                wb = candidate;
-
-                                try
-                                {
-                                    if (visible) { app.Visible = true; app.UserControl = true; }
-                                    wb.Activate();
-                                }
-                                catch { /* no-op */ }
-
-                                return false; // did not create a new Excel application
-                            }
-                        }
-                    }
-                    catch { /* ignore and continue to open below */ }
+                    SafeQuitExcel(running); // discards unsaved changes, releases RCWs, GC x2
+                    running = null;
                 }
 
-                // 2) No open copy found → reuse running Excel or create a new instance
-                if (runningApp != null)
-                {
-                    app = runningApp;
-                }
-                else
+                // 1) Create a fresh Excel instance and open the workbook (no prompts)
+                bool createdApplication = false;
+                try
                 {
                     app = new Excel.Application();
                     createdApplication = true;
-                }
 
-                // 3) Open the workbook (avoid prompts & read-only recommendation)
-                //    NOTE: if the file doesn’t exist, this will throw; handle as you prefer.
-                try
-                {
-                    wb = app.Workbooks.Open(
-                        Filename: fullPath,
-                        UpdateLinks: 0,
-                        ReadOnly: readOnly,
-                        IgnoreReadOnlyRecommended: true,
-                        AddToMru: false
-                    );
-                }
-                catch
-                {
-                    // Optional fallback: if not explicitly readOnly and open failed (e.g., locked),
-                    // try opening as read-only once.
-                    if (!readOnly)
+                    bool prevAlerts = false;
+                    try { prevAlerts = app.DisplayAlerts; app.DisplayAlerts = false; } catch { }
+
+                    try
                     {
-                        try
+                        wb = app.Workbooks.Open(
+                            Filename: fullPath,
+                            UpdateLinks: 0,
+                            ReadOnly: readOnly,
+                            IgnoreReadOnlyRecommended: true,
+                            AddToMru: false
+                        );
+                    }
+                    catch
+                    {
+                        // Fallback: try read-only once
+                        if (!readOnly)
                         {
                             wb = app.Workbooks.Open(
                                 Filename: fullPath,
@@ -159,88 +116,237 @@ namespace GhcETABSAPI
                                 AddToMru: false
                             );
                         }
-                        catch
+                        else
                         {
-                            // Clean up partially created app if we made it
-                            try { if (createdApplication) app.Quit(); } catch { }
-                            try { ReleaseCom(wb); } catch { }
-                            try { ReleaseCom(app); } catch { }
-                            wb = null; app = null;
-                            return false;
+                            throw;
                         }
                     }
-                    else
+                    finally
                     {
-                        try { if (createdApplication) app.Quit(); } catch { }
-                        try { ReleaseCom(wb); } catch { }
-                        try { ReleaseCom(app); } catch { }
-                        wb = null; app = null;
-                        return false;
+                        try { app.DisplayAlerts = prevAlerts; } catch { }
                     }
-                }
 
-                // 4) Final UI touches
-                try
+                    // 2) UI polish
+                    try
+                    {
+                        if (visible) { app.Visible = true; app.UserControl = true; }
+                        wb.Activate();
+                    }
+                    catch { /* no-op */ }
+
+                    // With the force-restart strategy, a new Excel.exe is always spawned on success
+                    return createdApplication; // true
+                }
+                catch
                 {
-                    if (visible) { app.Visible = true; app.UserControl = true; }
-                    wb.Activate();
+                    // Cleanup on failure
+                    try { if (createdApplication) app?.Quit(); } catch { }
+                    try { ReleaseCom(wb); } catch { }
+                    try { ReleaseCom(app); } catch { }
+                    wb = null; app = null;
+                    return false;
                 }
-                catch { /* no-op */ }
-
-                return createdApplication; // true if we spawned a new Excel.exe, else false
             }
         }
 
+        /// <summary>
+        /// Close all workbooks (no prompts), quit the app, release RCWs, then double-GC.
+        /// </summary>
+        private static void SafeQuitExcel(Excel.Application excel)
+        {
+            if (excel == null) return;
+
+            bool prevAlerts = false;
+            try { prevAlerts = excel.DisplayAlerts; excel.DisplayAlerts = false; } catch { }
+            try { excel.ScreenUpdating = false; } catch { }
+            try { excel.UserControl = false; } catch { }
+
+            Excel.Workbooks books = null;
+            try
+            {
+                books = excel.Workbooks;
+                // Close from last to first; do NOT use foreach (creates hidden enumerator RCWs)
+                for (int i = books.Count; i >= 1; i--)
+                {
+                    Excel.Workbook wb = null;
+                    try { wb = books[i]; wb.Close(SaveChanges: false); }
+                    catch { /* ignore */ }
+                    finally { ReleaseCom(wb); }
+                }
+            }
+            catch { }
+            finally { ReleaseCom(books); }
+
+            try { excel.Quit(); } catch { }
+            ReleaseCom(excel);
+
+            // Ensure COM proxies are finalized so EXCEL.EXE actually exits
+            try
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Try to get a running Excel instance WITHOUT Marshal.GetActiveObject.
+        /// 1) VB Interaction.GetObject
+        /// 2) HWND/Accessibility (FindWindowEx + AccessibleObjectFromWindow)
+        /// Returns null if not found / not accessible.
+        /// </summary>
         private static Excel.Application TryGetRunningExcelApplication()
         {
             Excel.Application result = null;
-            Exception capturedError = null;
+            Exception captured = null;
 
             void Probe()
             {
+                // --- Route 1: VB Interaction ---
                 try
                 {
-                    // Interaction.GetObject works even when Excel is exposed only through VBA-style automation servers.
-                    object candidate = Interaction.GetObject(string.Empty, "Excel.Application");
-                    result = candidate as Excel.Application;
-                }
-                catch (COMException ex)
-                {
-                    capturedError = ex;
-                    result = null;
+                    object obj = Interaction.GetObject(null, "Excel.Application");
+                    result = obj as Excel.Application;
+                    if (result != null) return;
+
+                    // If late-bound object, try Application property
+                    if (obj != null)
+                    {
+                        var appObj = obj.GetType().InvokeMember("Application", BindingFlags.GetProperty, null, obj, null);
+                        result = appObj as Excel.Application;
+                        if (result != null) return;
+                    }
                 }
                 catch (Exception ex)
                 {
-                    capturedError = ex;
+                    captured = ex; // fall through to HWND route
+                    result = null;
+                }
+
+                // --- Route 2: HWND / Accessibility ---
+                try
+                {
+                    IntPtr prev = IntPtr.Zero;
+                    while (true)
+                    {
+                        IntPtr xlMain = FindWindowEx(IntPtr.Zero, prev, "XLMAIN", null);
+                        if (xlMain == IntPtr.Zero) break;
+                        prev = xlMain;
+
+                        if (TryGetAppFromHwnd(xlMain, out result) && result != null) return;
+
+                        IntPtr xlDesk = FindWindowEx(xlMain, IntPtr.Zero, "XLDESK", null);
+                        if (xlDesk != IntPtr.Zero)
+                        {
+                            IntPtr excel7 = FindWindowEx(xlDesk, IntPtr.Zero, "EXCEL7", null);
+                            if (excel7 != IntPtr.Zero)
+                            {
+                                if (TryGetAppFromHwnd(excel7, out result) && result != null) return;
+
+                                if (TryGetComFromHwnd(excel7, out object sheetObj) && sheetObj != null)
+                                {
+                                    try
+                                    {
+                                        var appObj = sheetObj.GetType().InvokeMember("Application", BindingFlags.GetProperty, null, sheetObj, null);
+                                        result = appObj as Excel.Application;
+                                        if (result != null) return;
+                                    }
+                                    catch { /* ignore */ }
+                                    finally
+                                    {
+                                        try { if (Marshal.IsComObject(sheetObj)) Marshal.FinalReleaseComObject(sheetObj); } catch { }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    captured = ex;
                     result = null;
                 }
             }
 
+            // Ensure STA for COM calls
             if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
             {
                 Probe();
             }
             else
             {
-                var probeThread = new Thread(Probe)
-                {
-                    IsBackground = true
-                };
-                probeThread.SetApartmentState(ApartmentState.STA);
-                probeThread.Start();
-                probeThread.Join();
+                var t = new Thread(Probe) { IsBackground = true };
+                t.SetApartmentState(ApartmentState.STA);
+                t.Start();
+                t.Join();
             }
 
-            if (result == null && capturedError != null)
+            if (result == null && captured != null)
+                Debug.WriteLine("Excel not reachable via Interaction/AccessibleObject: " + captured.Message);
+
+            return result; // null if no instance
+        }
+
+        // ---- Win32 + Accessibility interop helpers ----
+        private const uint OBJID_NATIVEOM = 0xFFFFFFF0;
+        private static readonly Guid IID_IDispatch = new Guid("00020400-0000-0000-C000-000000000046");
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
+
+        [DllImport("oleacc.dll")]
+        private static extern int AccessibleObjectFromWindow(
+            IntPtr hwnd, uint dwObjectID, ref Guid riid,
+            [MarshalAs(UnmanagedType.IDispatch)] out object ppvObject);
+
+        private static bool TryGetComFromHwnd(IntPtr hwnd, out object com)
+        {
+            com = null;
+            try
             {
-                System.Diagnostics.Debug.WriteLine($"Unable to attach to running Excel instance: {capturedError}");
-            }
+                // COPY readonly field ra biến local
+                Guid iid = IID_IDispatch;
 
-            return result;
+                int hr = AccessibleObjectFromWindow(hwnd, OBJID_NATIVEOM, ref iid, out object obj);
+                if (hr >= 0 && obj != null)
+                {
+                    com = obj;
+                    return true;
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        private static bool TryGetAppFromHwnd(IntPtr hwnd, out Excel.Application app)
+        {
+            app = null;
+            if (TryGetComFromHwnd(hwnd, out object obj) && obj != null)
+            {
+                // Try cast directly
+                app = obj as Excel.Application;
+                if (app != null) return true;
+
+                // Or get Application property
+                try
+                {
+                    var appObj = obj.GetType().InvokeMember("Application", BindingFlags.GetProperty, null, obj, null);
+                    app = appObj as Excel.Application;
+                    if (app != null) return true;
+                }
+                catch { }
+                finally
+                {
+                    try { if (Marshal.IsComObject(obj)) Marshal.FinalReleaseComObject(obj); } catch { }
+                }
+            }
+            return false;
         }
 
         /// <summary>
-        /// Get a worksheet by name; create if missing.
+        /// Get a worksheet by name; create if missing. Returns a WS RCW owned by the caller.
         /// </summary>
         internal static Excel.Worksheet GetOrCreateWorksheet(Excel.Workbook wb, string sheetName)
         {
@@ -250,13 +356,23 @@ namespace GhcETABSAPI
             Excel.Worksheet ws = null;
             try
             {
+                // 1-based loop and release intermediates to avoid leaks
                 for (int i = 1; i <= wb.Worksheets.Count; i++)
                 {
-                    var s = (Excel.Worksheet)wb.Worksheets[i];
-                    if (string.Equals(s.Name, sheetName, StringComparison.OrdinalIgnoreCase))
+                    Excel.Worksheet s = null;
+                    try
                     {
-                        ws = s;
-                        break;
+                        s = (Excel.Worksheet)wb.Worksheets[i];
+                        if (string.Equals(s.Name, sheetName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            ws = s; // transfer ownership to caller
+                            s = null;
+                            break;
+                        }
+                    }
+                    finally
+                    {
+                        if (s != null) ReleaseCom(s);
                     }
                 }
             }
@@ -264,14 +380,25 @@ namespace GhcETABSAPI
 
             if (ws == null)
             {
-                ws = (Excel.Worksheet)wb.Worksheets.Add(After: wb.Worksheets[wb.Worksheets.Count]);
-                try { ws.Name = sheetName; } catch { /* could clash, leave default */ }
+                Excel.Sheets sheets = null;
+                try
+                {
+                    sheets = wb.Worksheets;
+                    ws = (Excel.Worksheet)sheets.Add(After: sheets[sheets.Count]);
+                    try { ws.Name = sheetName; } catch { /* could clash, leave default */ }
+                }
+                finally
+                {
+                    ReleaseCom(sheets);
+                }
             }
 
             return ws;
         }
 
-        // Using existing workbook/worksheet (no attach/open here)
+        /// <summary>
+        /// Using existing workbook/worksheet (no attach/open here). Writes a ragged column dictionary starting at (startRow,startColumn).
+        /// </summary>
         internal static string WriteDictionaryToWorksheet(
             IDictionary<string, List<object>> data,
             IList<string> headers,
@@ -297,31 +424,12 @@ namespace GhcETABSAPI
                 ws = GetOrCreateWorksheet(wb, worksheetName);
                 if (ws == null) return "Failed to access worksheet.";
 
-                // Build column order (explicit order preferred, otherwise dictionary order)
-                List<string> columnKeys = null;
+                // Build column order (explicit order preferred, otherwise dictionary order + append any missing keys)
+                var columnKeys = new List<string>();
                 if (columnOrder != null && columnOrder.Count > 0)
-                {
-                    columnKeys = new List<string>(columnOrder);
-                }
-                else if (data != null)
-                {
-                    columnKeys = new List<string>(data.Keys);
-                }
-                else
-                {
-                    columnKeys = new List<string>();
-                }
-
-                if (data != null)
-                {
-                    foreach (var key in data.Keys)
-                    {
-                        if (!columnKeys.Contains(key))
-                        {
-                            columnKeys.Add(key);
-                        }
-                    }
-                }
+                    columnKeys.AddRange(columnOrder);
+                foreach (var k in data.Keys)
+                    if (!columnKeys.Contains(k)) columnKeys.Add(k);
 
                 int colCount = columnKeys.Count;
                 if (colCount == 0) return "Dictionary is empty.";
@@ -329,10 +437,8 @@ namespace GhcETABSAPI
                 int maxRows = 0;
                 foreach (var k in columnKeys)
                 {
-                    if (data != null && data.TryGetValue(k, out var lst) && lst != null && lst.Count > maxRows)
-                    {
+                    if (data.TryGetValue(k, out var lst) && lst != null && lst.Count > maxRows)
                         maxRows = lst.Count;
-                    }
                 }
 
                 int totalRows = Math.Max(1, maxRows + 1); // +1 for header row
@@ -341,15 +447,13 @@ namespace GhcETABSAPI
                 for (int c = 0; c < colCount; c++)
                 {
                     string key = columnKeys[c] ?? string.Empty;
-                    string headerLabel = key;
-                    if (headers != null && c < headers.Count && !string.IsNullOrWhiteSpace(headers[c]))
-                    {
-                        headerLabel = headers[c];
-                    }
+                    string headerLabel = (headers != null && c < headers.Count && !string.IsNullOrWhiteSpace(headers[c]))
+                        ? headers[c]
+                        : key;
 
                     values[0, c] = headerLabel ?? string.Empty;
 
-                    if (data == null || !data.TryGetValue(key, out var branch) || branch == null) continue;
+                    if (!data.TryGetValue(key, out var branch) || branch == null) continue;
                     for (int r = 0; r < branch.Count; r++)
                         values[r + 1, c] = branch[r];
                 }
@@ -386,7 +490,7 @@ namespace GhcETABSAPI
                 ReleaseCom(range);
                 ReleaseCom(topLeft);
                 ReleaseCom(bottomRight);
-                ReleaseCom(ws); // we created the WS RCW here; caller still owns the workbook
+                ReleaseCom(ws); // WS RCW created here; caller still owns the workbook
             }
         }
 
@@ -405,6 +509,5 @@ namespace GhcETABSAPI
 
             return builder.Length > 0 ? builder.ToString() : "A";
         }
-
     }
 }
