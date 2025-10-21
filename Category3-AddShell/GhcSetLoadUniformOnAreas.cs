@@ -24,7 +24,6 @@ using System.Collections.Generic;
 using System.Text;
 using Grasshopper.Kernel;
 using ETABSv1;
-using static GhcETABSAPI.ComponentShared;
 
 namespace GhcETABSAPI
 {
@@ -156,7 +155,7 @@ namespace GhcETABSAPI
                     shellNames.Add(nm == null ? string.Empty : nm.Trim());
                 }
 
-                string csys = ResolveDirectionReferenceArea(dirCode);
+                string csys = ResolveCoordinateSystem(dirCode);
                 bool replace = replaceMode;
 
                 List<string> assigned = new List<string>();
@@ -223,6 +222,11 @@ namespace GhcETABSAPI
             da.SetData(0, _lastMessage);
         }
 
+        private static string ResolveCoordinateSystem(int dirCode)
+        {
+            return dirCode >= 1 && dirCode <= 3 ? "Local" : "Global";
+        }
+
         private static string FormatLabel(int index, string name)
         {
             string display = string.IsNullOrWhiteSpace(name) ? "(blank)" : name;
@@ -257,6 +261,46 @@ namespace GhcETABSAPI
             }
 
             return string.Join(", ", entries);
+        }
+
+        private static HashSet<string> TryGetExistingAreaNames(cSapModel model)
+        {
+            if (model == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                int count = 0;
+                string[] names = null;
+                int ret = model.AreaObj.GetNameList(ref count, ref names);
+                if (ret != 0)
+                {
+                    return null;
+                }
+
+                HashSet<string> result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (names == null)
+                {
+                    return result;
+                }
+
+                for (int i = 0; i < names.Length; i++)
+                {
+                    string nm = names[i];
+                    if (!string.IsNullOrWhiteSpace(nm))
+                    {
+                        result.Add(nm.Trim());
+                    }
+                }
+
+                return result;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static void TryRefreshView(cSapModel model)

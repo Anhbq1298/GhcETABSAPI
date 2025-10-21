@@ -137,7 +137,7 @@ namespace GhcETABSAPI
 
                 int loadType = (myType == 2) ? 2 : 1;
                 int direction = ClampDirCode(dirCode);
-                string coordinateSystem = ResolveDirectionReference(direction);
+                string coordinateSystem = ResolveCoordinateSystem(direction);
                 bool replaceFlag = replaceMode;
 
                 int frameCount = frameNames.Count;
@@ -367,5 +367,52 @@ namespace GhcETABSAPI
             }
         }
 
+        private static double Clamp01(double value)
+        {
+            if (value < 0.0) return 0.0;
+            if (value > 1.0) return 1.0;
+            return value;
+        }
+
+        private static int ClampDirCode(int dirCode)
+        {
+            if (dirCode < 1 || dirCode > 11)
+            {
+                return 10;
+            }
+
+            return dirCode;
+        }
+
+        private static string ResolveCoordinateSystem(int direction)
+        {
+            string directionReference = Math.Abs(direction) < 10 ? "Local" : "Global";
+            return directionReference;
+        }
+
+        private static bool IsInvalidNumber(double value)
+        {
+            return double.IsNaN(value) || double.IsInfinity(value);
+        }
+
+        private static double? TryGet(IList<double> source, int index)
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            if (index < 0 || index >= source.Count)
+            {
+                return null;
+            }
+
+            return source[index];
+        }
+
+        private static string Plural(int count, string word)
+        {
+            return count == 1 ? $"{count} {word}" : $"{count} {word}s";
+        }
     }
 }
