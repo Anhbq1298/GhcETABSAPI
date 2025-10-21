@@ -101,7 +101,7 @@ namespace GhcETABSAPI
             }
 
             GH_Structure<IGH_Goo> tree = null;
-            string workbookPath = "TreeExport.xlsx";
+            string workbookPath = null;
             string worksheetName = "Sheet1";
             string address = "A1";
             bool visible = true;
