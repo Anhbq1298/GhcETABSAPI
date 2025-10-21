@@ -261,6 +261,8 @@ namespace GhcETABSAPI
             int total = 0;
             int failCount = 0;
 
+            Dictionary<string, double?> lengthCache = new Dictionary<string, double?>(StringComparer.OrdinalIgnoreCase);
+
             if (uniqueNames == null || uniqueNames.Count == 0)
             {
                 return (0, 0, frameNameOut, loadPatOut, myTypeOut, cSysOut, dirOut, rd1Out, rd2Out, dist1Out, dist2Out, val1Out, val2Out);
@@ -317,16 +319,47 @@ namespace GhcETABSAPI
 
                 for (int i = 0; i < n; i++)
                 {
-                    frameNameOut.Add(frameName[i]);
+                    string resolvedFrameName = frameName[i];
+                    double? frameLength = GetCachedFrameLength(sapModel, resolvedFrameName, lengthCache);
+
+                    double? relDist1In = ToNullable(rd1[i]);
+                    double? relDist2In = ToNullable(rd2[i]);
+                    double? dist1In = ToNullable(dist1[i]);
+                    double? dist2In = ToNullable(dist2[i]);
+
+                    double relDist1Out = rd1[i];
+                    double relDist2Out = rd2[i];
+                    double dist1OutVal = dist1[i];
+                    double dist2OutVal = dist2[i];
+
+                    if (TryResolveDistances(
+                            frameLength,
+                            relDist1In,
+                            relDist2In,
+                            dist1In,
+                            dist2In,
+                            out double rel1Resolved,
+                            out double rel2Resolved,
+                            out double dist1Resolved,
+                            out double dist2Resolved,
+                            out _))
+                    {
+                        relDist1Out = rel1Resolved;
+                        relDist2Out = rel2Resolved;
+                        dist1OutVal = dist1Resolved;
+                        dist2OutVal = dist2Resolved;
+                    }
+
+                    frameNameOut.Add(resolvedFrameName);
                     loadPatOut.Add(loadPat[i]);
                     myTypeOut.Add(myType[i]);
                     string directionReference = ResolveDirectionReference(dir[i]);
                     cSysOut.Add(directionReference);
                     dirOut.Add(dir[i]);
-                    rd1Out.Add(rd1[i]);
-                    rd2Out.Add(rd2[i]);
-                    dist1Out.Add(dist1[i]);
-                    dist2Out.Add(dist2[i]);
+                    rd1Out.Add(relDist1Out);
+                    rd2Out.Add(relDist2Out);
+                    dist1Out.Add(dist1OutVal);
+                    dist2Out.Add(dist2OutVal);
                     val1Out.Add(val1[i]);
                     val2Out.Add(val2[i]);
                 }
@@ -460,6 +493,9 @@ namespace GhcETABSAPI
                 dist1Out, dist2Out, val1Out, val2Out);
         }
 
+        private static readonly double DistanceTolerance = 1e-6;
+        private static readonly double LengthTolerance = 1e-9;
+
         private static string FormatLoadPatternSummary(IReadOnlyList<string> filters)
         {
             if (filters == null || filters.Count == 0)
@@ -473,6 +509,260 @@ namespace GhcETABSAPI
             }
 
             return $"load patterns ({string.Join(", ", filters)})";
+        }
+
+        private static bool TryResolveDistances(
+            double? frameLength,
+            double? relDist1In,
+            double? relDist2In,
+            double? dist1In,
+            double? dist2In,
+            out double relDist1,
+            out double relDist2,
+            out double dist1,
+            out double dist2,
+            out bool adjusted)
+        {
+            relDist1 = 0.0;
+            relDist2 = 0.0;
+            dist1 = 0.0;
+            dist2 = 0.0;
+            adjusted = false;
+
+            bool hasRel = relDist1In.HasValue && relDist2In.HasValue && IsFiniteNumber(relDist1In.Value) && IsFiniteNumber(relDist2In.Value);
+            bool hasAbs = dist1In.HasValue && dist2In.HasValue && IsFiniteNumber(dist1In.Value) && IsFiniteNumber(dist2In.Value);
+
+            if (!hasRel && !hasAbs)
+            {
+                return false;
+            }
+
+            double? safeLength = (frameLength.HasValue && IsFiniteNumber(frameLength.Value) && frameLength.Value > LengthTolerance)
+                ? frameLength
+                : (double?)null;
+
+            if (hasRel)
+            {
+                double r1 = Clamp01(relDist1In.Value);
+                double r2 = Clamp01(relDist2In.Value);
+
+                if (!NearlyEqual(r1, relDist1In.Value) || !NearlyEqual(r2, relDist2In.Value))
+                {
+                    adjusted = true;
+                }
+
+                if (r1 > r2)
+                {
+                    double tmp = r1;
+                    r1 = r2;
+                    r2 = tmp;
+                    adjusted = true;
+                }
+
+                relDist1 = r1;
+                relDist2 = r2;
+
+                if (safeLength.HasValue)
+                {
+                    double length = safeLength.Value;
+                    double computedAbs1 = ClampAbsolute(r1 * length, length, out bool clamped1);
+                    double computedAbs2 = ClampAbsolute(r2 * length, length, out bool clamped2);
+
+                    if (clamped1 || clamped2)
+                    {
+                        adjusted = true;
+                    }
+
+                    if (hasAbs)
+                    {
+                        double adjAbs1 = ClampAbsolute(dist1In.Value, length, out bool clampedIn1);
+                        double adjAbs2 = ClampAbsolute(dist2In.Value, length, out bool clampedIn2);
+
+                        if (clampedIn1 || clampedIn2)
+                        {
+                            adjusted = true;
+                        }
+
+                        if (Math.Abs(adjAbs1 - computedAbs1) > DistanceTolerance * Math.Max(1.0, length))
+                        {
+                            adjusted = true;
+                            dist1 = computedAbs1;
+                        }
+                        else
+                        {
+                            dist1 = adjAbs1;
+                        }
+
+                        if (Math.Abs(adjAbs2 - computedAbs2) > DistanceTolerance * Math.Max(1.0, length))
+                        {
+                            adjusted = true;
+                            dist2 = computedAbs2;
+                        }
+                        else
+                        {
+                            dist2 = adjAbs2;
+                        }
+                    }
+                    else
+                    {
+                        dist1 = computedAbs1;
+                        dist2 = computedAbs2;
+                    }
+                }
+                else
+                {
+                    dist1 = hasAbs ? dist1In.Value : 0.0;
+                    dist2 = hasAbs ? dist2In.Value : 0.0;
+                }
+
+                return true;
+            }
+
+            if (!safeLength.HasValue)
+            {
+                return false;
+            }
+
+            double len = safeLength.Value;
+            double abs1 = ClampAbsolute(dist1In.Value, len, out bool clampedAbs1);
+            double abs2 = ClampAbsolute(dist2In.Value, len, out bool clampedAbs2);
+
+            if (clampedAbs1 || clampedAbs2)
+            {
+                adjusted = true;
+            }
+
+            if (abs1 > abs2)
+            {
+                double tmp = abs1;
+                abs1 = abs2;
+                abs2 = tmp;
+                adjusted = true;
+            }
+
+            double rawRel1 = len <= 0.0 ? 0.0 : abs1 / len;
+            double rawRel2 = len <= 0.0 ? 0.0 : abs2 / len;
+            double r1Out = Clamp01(rawRel1);
+            double r2Out = Clamp01(rawRel2);
+
+            if (!NearlyEqual(r1Out, rawRel1) || !NearlyEqual(r2Out, rawRel2))
+            {
+                adjusted = true;
+            }
+
+            relDist1 = r1Out;
+            relDist2 = r2Out;
+            dist1 = relDist1 * len;
+            dist2 = relDist2 * len;
+            return true;
+        }
+
+        private static double ClampAbsolute(double value, double length, out bool clamped)
+        {
+            double original = value;
+            double max = Math.Max(0.0, length);
+
+            if (value < 0.0)
+            {
+                value = 0.0;
+            }
+            if (value > max)
+            {
+                value = max;
+            }
+
+            clamped = Math.Abs(value - original) > DistanceTolerance * Math.Max(1.0, max);
+            return value;
+        }
+
+        private static double Clamp01(double value)
+        {
+            if (value < 0.0) return 0.0;
+            if (value > 1.0) return 1.0;
+            return value;
+        }
+
+        private static bool IsFiniteNumber(double value)
+        {
+            return !double.IsNaN(value) && !double.IsInfinity(value);
+        }
+
+        private static bool NearlyEqual(double a, double b)
+        {
+            double scale = Math.Max(1.0, Math.Abs(a) + Math.Abs(b));
+            return Math.Abs(a - b) <= DistanceTolerance * scale;
+        }
+
+        private static double? ToNullable(double value)
+        {
+            return IsFiniteNumber(value) ? (double?)value : null;
+        }
+
+        private static double? GetCachedFrameLength(cSapModel model, string frameName, IDictionary<string, double?> cache)
+        {
+            if (cache == null || string.IsNullOrWhiteSpace(frameName))
+            {
+                return null;
+            }
+
+            if (cache.TryGetValue(frameName, out double? cached))
+            {
+                return cached;
+            }
+
+            double? length = TryGetFrameLength(model, frameName);
+            cache[frameName] = length;
+            return length;
+        }
+
+        private static double? TryGetFrameLength(cSapModel model, string frameName)
+        {
+            if (model == null || string.IsNullOrWhiteSpace(frameName))
+            {
+                return null;
+            }
+
+            try
+            {
+                string pointI = null;
+                string pointJ = null;
+                int ret = model.FrameObj.GetPoints(frameName, ref pointI, ref pointJ);
+                if (ret != 0 || string.IsNullOrWhiteSpace(pointI) || string.IsNullOrWhiteSpace(pointJ))
+                {
+                    return null;
+                }
+
+                double xi = 0.0, yi = 0.0, zi = 0.0;
+                double xj = 0.0, yj = 0.0, zj = 0.0;
+
+                ret = model.PointObj.GetCoordCartesian(pointI, ref xi, ref yi, ref zi);
+                if (ret != 0)
+                {
+                    return null;
+                }
+
+                ret = model.PointObj.GetCoordCartesian(pointJ, ref xj, ref yj, ref zj);
+                if (ret != 0)
+                {
+                    return null;
+                }
+
+                double dx = xj - xi;
+                double dy = yj - yi;
+                double dz = zj - zi;
+                double length = Math.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
+
+                if (!IsFiniteNumber(length) || length <= LengthTolerance)
+                {
+                    return null;
+                }
+
+                return length;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private void UpdateAndPushOutputs(IGH_DataAccess da, GH_Structure<GH_String> headerTree, GH_Structure<GH_ObjectWrapper> valueTree,

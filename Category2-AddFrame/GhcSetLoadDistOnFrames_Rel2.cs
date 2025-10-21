@@ -135,11 +135,12 @@ namespace GhcETABSAPI
                     fullPath,
                     sheetName,
                     (current, maximum, status) => UiHelpers.UpdateExcelProgressBar(current, maximum, status));
-                valueTree = BuildValueTree(excelData);
 
                 if (excelData.RowCount == 0)
                 {
+                    valueTree = BuildValueTree(excelData);
                     messages.Add($"Read 0 data rows from sheet '{sheetName}'. Nothing to assign.");
+                    UiHelpers.CloseProgressBar();
                 }
                 else
                 {
@@ -152,13 +153,18 @@ namespace GhcETABSAPI
                     int failedCount = 0;
                     List<string> failedPairs = new List<string>();
                     List<string> skippedPairs = new List<string>();
+                    List<string> normalizedPairs = new List<string>();
 
                     List<PreparedLoadAssignment> preparedLoads = PrepareLoadAssignments(
+                        sapModel,
                         excelData,
                         existingNames,
                         skippedPairs,
                         failedPairs,
+                        normalizedPairs,
                         ref failedCount);
+
+                    valueTree = BuildValueTree(excelData);
 
                     int totalPrepared = preparedLoads.Count;
                     UiHelpers.UpdateAssignmentProgressBar(
@@ -227,6 +233,11 @@ namespace GhcETABSAPI
                         messages.Add("Skipped members (0-based index:name): " + string.Join(", ", skippedPairs));
                     }
 
+                    if (normalizedPairs.Count > 0)
+                    {
+                        messages.Add("Normalized distance inputs (rowIndex:frame): " + string.Join(", ", normalizedPairs));
+                    }
+
                     try
                     {
                         sapModel.View.RefreshView(0, false);
@@ -254,10 +265,12 @@ namespace GhcETABSAPI
         }
 
         private static List<PreparedLoadAssignment> PrepareLoadAssignments(
+            cSapModel sapModel,
             ExcelLoadData excelData,
             HashSet<string> existingNames,
             List<string> skippedPairs,
             List<string> failedPairs,
+            List<string> normalizedPairs,
             ref int failedCount)
         {
             List<PreparedLoadAssignment> prepared = new List<PreparedLoadAssignment>();
@@ -265,6 +278,8 @@ namespace GhcETABSAPI
             {
                 return prepared;
             }
+
+            Dictionary<string, double?> lengthCache = new Dictionary<string, double?>(StringComparer.OrdinalIgnoreCase);
 
             for (int i = 0; i < excelData.RowCount; i++)
             {
@@ -274,14 +289,21 @@ namespace GhcETABSAPI
                 int? rawDirection = excelData.Direction[i];
                 double? rawRelDist1 = excelData.RelDist1[i];
                 double? rawRelDist2 = excelData.RelDist2[i];
+                double? rawDist1 = excelData.Dist1[i];
+                double? rawDist2 = excelData.Dist2[i];
                 double? rawVal1 = excelData.Value1[i];
                 double? rawVal2 = excelData.Value2[i];
                 string coordinateOverride = TrimOrEmpty(excelData.CoordinateSystem[i]);
 
+                bool hasRelDistances = rawRelDist1.HasValue && rawRelDist2.HasValue &&
+                    !IsInvalidNumber(rawRelDist1.Value) && !IsInvalidNumber(rawRelDist2.Value);
+                bool hasAbsoluteDistances = rawDist1.HasValue && rawDist2.HasValue &&
+                    !IsInvalidNumber(rawDist1.Value) && !IsInvalidNumber(rawDist2.Value);
+
                 if (string.IsNullOrEmpty(frameName) || string.IsNullOrEmpty(loadPattern) ||
                     !rawType.HasValue || !rawDirection.HasValue ||
-                    !rawRelDist1.HasValue || !rawRelDist2.HasValue ||
-                    !rawVal1.HasValue || !rawVal2.HasValue)
+                    !rawVal1.HasValue || !rawVal2.HasValue ||
+                    (!hasRelDistances && !hasAbsoluteDistances))
                 {
                     skippedPairs.Add($"{i}:{frameName}");
                     continue;
@@ -296,24 +318,42 @@ namespace GhcETABSAPI
 
                 int loadType = NormalizeLoadType(rawType.Value);
                 int direction = ClampDirCode(rawDirection.Value);
-                double relDist1 = Clamp01(rawRelDist1.Value);
-                double relDist2 = Clamp01(rawRelDist2.Value);
                 double val1 = rawVal1.Value;
                 double val2 = rawVal2.Value;
 
-                if (IsInvalidNumber(relDist1) || IsInvalidNumber(relDist2) ||
-                    IsInvalidNumber(val1) || IsInvalidNumber(val2))
+                if (IsInvalidNumber(val1) || IsInvalidNumber(val2))
                 {
                     skippedPairs.Add($"{i}:{frameName}");
                     continue;
                 }
 
-                if (relDist1 > relDist2)
+                double? frameLength = GetCachedFrameLength(sapModel, frameName, lengthCache);
+
+                if (!TryResolveDistances(
+                        frameLength,
+                        rawRelDist1,
+                        rawRelDist2,
+                        rawDist1,
+                        rawDist2,
+                        out double relDist1,
+                        out double relDist2,
+                        out double absDist1,
+                        out double absDist2,
+                        out bool adjusted))
                 {
-                    double tmp = relDist1;
-                    relDist1 = relDist2;
-                    relDist2 = tmp;
+                    skippedPairs.Add($"{i}:{frameName}");
+                    continue;
                 }
+
+                if (adjusted)
+                {
+                    normalizedPairs?.Add($"{i}:{frameName}");
+                }
+
+                excelData.RelDist1[i] = relDist1;
+                excelData.RelDist2[i] = relDist2;
+                excelData.Dist1[i] = absDist1;
+                excelData.Dist2[i] = absDist2;
 
                 string coordinateSystem = !string.IsNullOrEmpty(coordinateOverride)
                     ? coordinateOverride
@@ -758,6 +798,9 @@ namespace GhcETABSAPI
             return null;
         }
 
+        private const double DistanceTolerance = 1e-6;
+        private const double LengthTolerance = 1e-9;
+
         private static int NormalizeLoadType(int loadType)
         {
             return loadType == 2 ? 2 : 1;
@@ -783,6 +826,245 @@ namespace GhcETABSAPI
         private static bool IsInvalidNumber(double value)
         {
             return double.IsNaN(value) || double.IsInfinity(value);
+        }
+
+        private static bool TryResolveDistances(
+            double? frameLength,
+            double? relDist1In,
+            double? relDist2In,
+            double? dist1In,
+            double? dist2In,
+            out double relDist1,
+            out double relDist2,
+            out double dist1,
+            out double dist2,
+            out bool adjusted)
+        {
+            relDist1 = 0.0;
+            relDist2 = 0.0;
+            dist1 = 0.0;
+            dist2 = 0.0;
+            adjusted = false;
+
+            bool hasRel = relDist1In.HasValue && relDist2In.HasValue &&
+                !IsInvalidNumber(relDist1In.Value) && !IsInvalidNumber(relDist2In.Value);
+            bool hasAbs = dist1In.HasValue && dist2In.HasValue &&
+                !IsInvalidNumber(dist1In.Value) && !IsInvalidNumber(dist2In.Value);
+
+            if (!hasRel && !hasAbs)
+            {
+                return false;
+            }
+
+            double? safeLength = (frameLength.HasValue && !IsInvalidNumber(frameLength.Value) && frameLength.Value > LengthTolerance)
+                ? frameLength
+                : (double?)null;
+
+            if (hasRel)
+            {
+                double r1 = Clamp01(relDist1In.Value);
+                double r2 = Clamp01(relDist2In.Value);
+
+                if (!NearlyEqual(r1, relDist1In.Value) || !NearlyEqual(r2, relDist2In.Value))
+                {
+                    adjusted = true;
+                }
+
+                if (r1 > r2)
+                {
+                    double tmp = r1;
+                    r1 = r2;
+                    r2 = tmp;
+                    adjusted = true;
+                }
+
+                relDist1 = r1;
+                relDist2 = r2;
+
+                if (safeLength.HasValue)
+                {
+                    double length = safeLength.Value;
+                    double computedAbs1 = ClampAbsolute(r1 * length, length, out bool clamped1);
+                    double computedAbs2 = ClampAbsolute(r2 * length, length, out bool clamped2);
+
+                    if (clamped1 || clamped2)
+                    {
+                        adjusted = true;
+                    }
+
+                    if (hasAbs)
+                    {
+                        double adjAbs1 = ClampAbsolute(dist1In.Value, length, out bool clampedIn1);
+                        double adjAbs2 = ClampAbsolute(dist2In.Value, length, out bool clampedIn2);
+
+                        if (clampedIn1 || clampedIn2)
+                        {
+                            adjusted = true;
+                        }
+
+                        if (Math.Abs(adjAbs1 - computedAbs1) > DistanceTolerance * Math.Max(1.0, length))
+                        {
+                            adjusted = true;
+                            dist1 = computedAbs1;
+                        }
+                        else
+                        {
+                            dist1 = adjAbs1;
+                        }
+
+                        if (Math.Abs(adjAbs2 - computedAbs2) > DistanceTolerance * Math.Max(1.0, length))
+                        {
+                            adjusted = true;
+                            dist2 = computedAbs2;
+                        }
+                        else
+                        {
+                            dist2 = adjAbs2;
+                        }
+                    }
+                    else
+                    {
+                        dist1 = computedAbs1;
+                        dist2 = computedAbs2;
+                    }
+                }
+                else
+                {
+                    dist1 = hasAbs ? dist1In.Value : 0.0;
+                    dist2 = hasAbs ? dist2In.Value : 0.0;
+                }
+
+                return true;
+            }
+
+            if (!safeLength.HasValue)
+            {
+                return false;
+            }
+
+            double len = safeLength.Value;
+            double abs1 = ClampAbsolute(dist1In.Value, len, out bool clampedAbs1);
+            double abs2 = ClampAbsolute(dist2In.Value, len, out bool clampedAbs2);
+
+            if (clampedAbs1 || clampedAbs2)
+            {
+                adjusted = true;
+            }
+
+            if (abs1 > abs2)
+            {
+                double tmp = abs1;
+                abs1 = abs2;
+                abs2 = tmp;
+                adjusted = true;
+            }
+
+            double rawRel1 = len <= 0.0 ? 0.0 : abs1 / len;
+            double rawRel2 = len <= 0.0 ? 0.0 : abs2 / len;
+            double r1Out = Clamp01(rawRel1);
+            double r2Out = Clamp01(rawRel2);
+
+            if (!NearlyEqual(r1Out, rawRel1) || !NearlyEqual(r2Out, rawRel2))
+            {
+                adjusted = true;
+            }
+
+            relDist1 = r1Out;
+            relDist2 = r2Out;
+            dist1 = relDist1 * len;
+            dist2 = relDist2 * len;
+            return true;
+        }
+
+        private static double ClampAbsolute(double value, double length, out bool clamped)
+        {
+            double original = value;
+            double max = Math.Max(0.0, length);
+
+            if (value < 0.0)
+            {
+                value = 0.0;
+            }
+            if (value > max)
+            {
+                value = max;
+            }
+
+            clamped = Math.Abs(value - original) > DistanceTolerance * Math.Max(1.0, max);
+            return value;
+        }
+
+        private static bool NearlyEqual(double a, double b)
+        {
+            double scale = Math.Max(1.0, Math.Abs(a) + Math.Abs(b));
+            return Math.Abs(a - b) <= DistanceTolerance * scale;
+        }
+
+        private static double? GetCachedFrameLength(cSapModel model, string frameName, IDictionary<string, double?> cache)
+        {
+            if (cache == null || string.IsNullOrWhiteSpace(frameName))
+            {
+                return null;
+            }
+
+            if (cache.TryGetValue(frameName, out double? cached))
+            {
+                return cached;
+            }
+
+            double? length = TryGetFrameLength(model, frameName);
+            cache[frameName] = length;
+            return length;
+        }
+
+        private static double? TryGetFrameLength(cSapModel model, string frameName)
+        {
+            if (model == null || string.IsNullOrWhiteSpace(frameName))
+            {
+                return null;
+            }
+
+            try
+            {
+                string pointI = null;
+                string pointJ = null;
+                int ret = model.FrameObj.GetPoints(frameName, ref pointI, ref pointJ);
+                if (ret != 0 || string.IsNullOrWhiteSpace(pointI) || string.IsNullOrWhiteSpace(pointJ))
+                {
+                    return null;
+                }
+
+                double xi = 0.0, yi = 0.0, zi = 0.0;
+                double xj = 0.0, yj = 0.0, zj = 0.0;
+
+                ret = model.PointObj.GetCoordCartesian(pointI, ref xi, ref yi, ref zi);
+                if (ret != 0)
+                {
+                    return null;
+                }
+
+                ret = model.PointObj.GetCoordCartesian(pointJ, ref xj, ref yj, ref zj);
+                if (ret != 0)
+                {
+                    return null;
+                }
+
+                double dx = xj - xi;
+                double dy = yj - yi;
+                double dz = zj - zi;
+                double length = Math.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
+
+                if (IsInvalidNumber(length) || length <= LengthTolerance)
+                {
+                    return null;
+                }
+
+                return length;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static string Plural(int count, string word)
