@@ -649,6 +649,285 @@ namespace GhcETABSAPI
             }
         }
 
+        internal static ExcelSheetColumnarData ReadColumnTable(
+            string fullPath,
+            string sheetName,
+            int startColumn,
+            string[] expectedHeaders,
+            Action<int, int, string> progressCallback = null)
+        {
+            if (string.IsNullOrWhiteSpace(fullPath))
+            {
+                throw new ArgumentException("Workbook path is required.", nameof(fullPath));
+            }
+
+            if (expectedHeaders == null || expectedHeaders.Length == 0)
+            {
+                throw new ArgumentException("At least one expected header must be supplied.", nameof(expectedHeaders));
+            }
+
+            Excel.Application app = null;
+            Excel.Workbooks books = null;
+            Excel.Workbook wb = null;
+            Excel.Worksheet ws = null;
+            Excel.Range usedRange = null;
+
+            try
+            {
+                app = new Excel.Application
+                {
+                    Visible = false,
+                    DisplayAlerts = false,
+                    UserControl = false
+                };
+
+                books = app.Workbooks;
+                wb = books.Open(
+                    Filename: fullPath,
+                    UpdateLinks: 0,
+                    ReadOnly: true,
+                    IgnoreReadOnlyRecommended: true,
+                    AddToMru: false);
+
+                ws = FindWorksheet(wb, sheetName);
+                if (ws == null)
+                {
+                    throw new InvalidOperationException($"Worksheet '{sheetName}' not found in '{Path.GetFileName(fullPath)}'.");
+                }
+
+                int columnCount = expectedHeaders.Length;
+                ExcelSheetColumnarData data = new ExcelSheetColumnarData(columnCount);
+
+                for (int col = 0; col < columnCount; col++)
+                {
+                    Excel.Range headerCell = null;
+                    try
+                    {
+                        headerCell = (Excel.Range)ws.Cells[1, startColumn + col];
+                        string headerValue = TrimOrEmpty(headerCell?.Value2);
+                        data.Headers.Add(headerValue);
+
+                        if (!string.Equals(headerValue, expectedHeaders[col], StringComparison.OrdinalIgnoreCase))
+                        {
+                            char columnLetter = (char)('A' + startColumn + col - 1);
+                            throw new InvalidOperationException(
+                                $"Invalid workbook: expected header '{expectedHeaders[col]}' in column {columnLetter}, found '{headerValue}'.");
+                        }
+                    }
+                    finally
+                    {
+                        ReleaseCom(headerCell);
+                    }
+                }
+
+                usedRange = ws.UsedRange;
+                int lastRow = 1;
+                if (usedRange != null)
+                {
+                    try
+                    {
+                        lastRow = Math.Max(lastRow, usedRange.Row + usedRange.Rows.Count - 1);
+                    }
+                    catch
+                    {
+                        lastRow = 1;
+                    }
+                }
+
+                int totalRows = Math.Max(0, lastRow - 1);
+                progressCallback?.Invoke(0, totalRows, BuildExcelProgressStatus(0, totalRows));
+
+                int processedRows = 0;
+
+                for (int row = 2; row <= lastRow; row++)
+                {
+                    object[] rowValues = new object[columnCount];
+                    bool hasData = false;
+
+                    for (int col = 0; col < columnCount; col++)
+                    {
+                        Excel.Range cell = null;
+                        try
+                        {
+                            cell = (Excel.Range)ws.Cells[row, startColumn + col];
+                            object value = cell?.Value2;
+                            rowValues[col] = value;
+                            if (!IsNullOrEmptyExcel(value))
+                            {
+                                hasData = true;
+                            }
+                        }
+                        finally
+                        {
+                            ReleaseCom(cell);
+                        }
+                    }
+
+                    processedRows++;
+                    int current = totalRows > 0 ? Math.Min(processedRows, totalRows) : processedRows;
+                    progressCallback?.Invoke(current, totalRows, BuildExcelProgressStatus(current, totalRows));
+
+                    if (!hasData)
+                    {
+                        continue;
+                    }
+
+                    data.AddRow(rowValues);
+                }
+
+                progressCallback?.Invoke(data.RowCount, data.RowCount, BuildExcelDoneStatus(data.RowCount));
+
+                return data;
+            }
+            finally
+            {
+                ReleaseCom(usedRange);
+
+                if (wb != null)
+                {
+                    try { wb.Close(false); } catch { }
+                }
+
+                ReleaseCom(ws);
+                ReleaseCom(wb);
+                ReleaseCom(books);
+
+                if (app != null)
+                {
+                    try { app.Quit(); } catch { }
+                }
+
+                ReleaseCom(app);
+            }
+        }
+
+        internal static Excel.Worksheet FindWorksheet(Excel.Workbook workbook, string sheetName)
+        {
+            if (workbook == null)
+            {
+                return null;
+            }
+
+            string targetName = string.IsNullOrWhiteSpace(sheetName) ? "Sheet1" : sheetName;
+
+            Excel.Worksheet result = null;
+
+            for (int i = 1; i <= workbook.Worksheets.Count; i++)
+            {
+                Excel.Worksheet candidate = null;
+                try
+                {
+                    candidate = (Excel.Worksheet)workbook.Worksheets[i];
+                    if (candidate != null && string.Equals(candidate.Name, targetName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        result = candidate;
+                        candidate = null;
+                        break;
+                    }
+                }
+                finally
+                {
+                    ReleaseCom(candidate);
+                }
+            }
+
+            return result;
+        }
+
+        internal static string TrimOrEmpty(object value)
+        {
+            if (value == null)
+            {
+                return string.Empty;
+            }
+
+            string s = Convert.ToString(value, CultureInfo.InvariantCulture);
+            return string.IsNullOrWhiteSpace(s) ? string.Empty : s.Trim();
+        }
+
+        internal static bool IsNullOrEmptyExcel(object value)
+        {
+            if (value == null)
+            {
+                return true;
+            }
+
+            if (value is string s)
+            {
+                return string.IsNullOrWhiteSpace(s);
+            }
+
+            return false;
+        }
+
+        internal static int? ParseNullableInt(object value)
+        {
+            if (value == null)
+            {
+                return null;
+            }
+
+            if (value is double d)
+            {
+                return (int)Math.Round(d, MidpointRounding.AwayFromZero);
+            }
+
+            string s = TrimOrEmpty(value);
+            if (string.IsNullOrEmpty(s))
+            {
+                return null;
+            }
+
+            return int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out int result)
+                ? result
+                : (int?)null;
+        }
+
+        internal static double? ParseNullableDouble(object value)
+        {
+            if (value == null)
+            {
+                return null;
+            }
+
+            if (value is double d)
+            {
+                return d;
+            }
+
+            string s = TrimOrEmpty(value);
+            if (string.IsNullOrEmpty(s))
+            {
+                return null;
+            }
+
+            return double.TryParse(s, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out double result)
+                ? result
+                : (double?)null;
+        }
+
+        internal static string BuildExcelProgressStatus(int processedRows, int totalRows)
+        {
+            int safeProcessed = Math.Max(0, processedRows);
+            int safeTotal = Math.Max(0, totalRows);
+            if (safeTotal <= 0)
+            {
+                return $"Reading Excel ({safeProcessed})";
+            }
+
+            int clamped = Math.Min(safeProcessed, safeTotal);
+            double percent = (clamped / (double)safeTotal) * 100.0;
+            return $"Reading Excel {clamped} of {safeTotal} rows ({percent:0.##}%).";
+        }
+
+        internal static string BuildExcelDoneStatus(int rowCount)
+        {
+            int safeCount = Math.Max(0, rowCount);
+            return safeCount == 1
+                ? "Excel Done (1 row)"
+                : $"Excel Done ({safeCount} rows)";
+        }
+
         private static string ColumnNumberToLetters(int column)
         {
             if (column < 1) column = 1;
@@ -662,6 +941,59 @@ namespace GhcETABSAPI
                 dividend = (dividend - modulo) / 26;
             }
             return builder.Length > 0 ? builder.ToString() : "A";
+        }
+    }
+
+    internal sealed class ExcelSheetColumnarData
+    {
+        private readonly List<List<object>> _columns;
+
+        internal ExcelSheetColumnarData(int columnCount)
+        {
+            if (columnCount <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(columnCount));
+            }
+
+            Headers = new List<string>(columnCount);
+            _columns = new List<List<object>>(columnCount);
+
+            for (int i = 0; i < columnCount; i++)
+            {
+                _columns.Add(new List<object>());
+            }
+        }
+
+        internal List<string> Headers { get; }
+
+        internal int RowCount => _columns.Count == 0 ? 0 : _columns[0].Count;
+
+        internal List<object> GetColumn(int index)
+        {
+            if (index < 0 || index >= _columns.Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(index));
+            }
+
+            return _columns[index];
+        }
+
+        internal void AddRow(object[] values)
+        {
+            if (values == null)
+            {
+                throw new ArgumentNullException(nameof(values));
+            }
+
+            if (values.Length != _columns.Count)
+            {
+                throw new ArgumentException("Value count does not match column count.", nameof(values));
+            }
+
+            for (int i = 0; i < _columns.Count; i++)
+            {
+                _columns[i].Add(values[i]);
+            }
         }
     }
 }

@@ -29,14 +29,12 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Globalization;
 using System.IO;
 using ETABSv1;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
 using static GhcETABSAPI.ComponentShared;
-using Excel = Microsoft.Office.Interop.Excel;
 
 namespace GhcETABSAPI
 {
@@ -133,7 +131,7 @@ namespace GhcETABSAPI
                     string.Empty,
                     0);
 
-                ExcelLoadData excelData = ReadExcelSheet(
+                AreaExcelData excelData = AreaExcelData.Read(
                     fullPath,
                     sheetName,
                     (current, maximum, status) => UiHelpers.UpdateExcelProgressBar(current, maximum, status));
@@ -246,7 +244,7 @@ namespace GhcETABSAPI
         }
 
         private static List<PreparedLoadAssignment> PrepareLoadAssignments(
-            ExcelLoadData excelData,
+            AreaExcelData excelData,
             HashSet<string> existingNames,
             List<string> skippedRows,
             List<string> missingRows)
@@ -259,9 +257,9 @@ namespace GhcETABSAPI
 
             for (int i = 0; i < excelData.RowCount; i++)
             {
-                string areaName = TrimOrEmpty(excelData.AreaName[i]);
-                string loadPattern = TrimOrEmpty(excelData.LoadPattern[i]);
-                string coordinateSystem = TrimOrEmpty(excelData.CoordinateSystem[i]);
+                string areaName = ExcelHelpers.TrimOrEmpty(excelData.AreaName[i]);
+                string loadPattern = ExcelHelpers.TrimOrEmpty(excelData.LoadPattern[i]);
+                string coordinateSystem = ExcelHelpers.TrimOrEmpty(excelData.CoordinateSystem[i]);
                 int? rawDirection = excelData.Direction[i];
                 double? rawValue = excelData.Value[i];
 
@@ -279,7 +277,7 @@ namespace GhcETABSAPI
                 }
 
                 int direction = ClampDirCode(rawDirection.Value);
-                string resolvedCoordinate = ResolveDirectionReference(direction);
+                string resolvedCoordinate = ResolveDirectionReferenceArea(direction);
 
 
                 excelData.AreaName[i] = areaName;
@@ -306,203 +304,7 @@ namespace GhcETABSAPI
             return prepared;
         }
 
-        private static ExcelLoadData ReadExcelSheet(
-            string fullPath,
-            string sheetName,
-            Action<int, int, string> progressCallback = null)
-        {
-            Excel.Application app = null;
-            Excel.Workbooks books = null;
-            Excel.Workbook wb = null;
-            Excel.Worksheet ws = null;
-            Excel.Range usedRange = null;
-
-            try
-            {
-                app = new Excel.Application
-                {
-                    Visible = false,
-                    DisplayAlerts = false,
-                    UserControl = false
-                };
-
-                books = app.Workbooks;
-                wb = books.Open(
-                    Filename: fullPath,
-                    UpdateLinks: 0,
-                    ReadOnly: true,
-                    IgnoreReadOnlyRecommended: true,
-                    AddToMru: false);
-
-                if (!string.Equals(sheetName, DefaultSheetName, StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new InvalidOperationException($"Invalid workbook: expected sheet name '{DefaultSheetName}'.");
-                }
-
-                ws = FindWorksheet(wb, sheetName);
-                if (ws == null)
-                {
-                    throw new InvalidOperationException($"Worksheet '{sheetName}' not found in '{Path.GetFileName(fullPath)}'.");
-                }
-
-                ExcelLoadData data = new ExcelLoadData();
-
-                const int startColumn = 2; // Column B
-                const int columnCount = 5;
-
-                string[] expectedHeaders =
-                {
-                    "AreaName",
-                    "LoadPattern",
-                    "CoordinateSystem",
-                    "Direction",
-                    "Value"
-                };
-
-                for (int col = 0; col < columnCount; col++)
-                {
-                    Excel.Range headerCell = null;
-                    try
-                    {
-                        headerCell = (Excel.Range)ws.Cells[1, startColumn + col];
-                        string headerValue = TrimOrEmpty(headerCell?.Value2);
-                        data.Headers.Add(headerValue);
-
-                        if (!string.Equals(headerValue, expectedHeaders[col], StringComparison.OrdinalIgnoreCase))
-                        {
-                            char columnLetter = (char)('A' + startColumn + col - 1);
-                            throw new InvalidOperationException(
-                                $"Invalid workbook: expected header '{expectedHeaders[col]}' in column {columnLetter}, found '{headerValue}'.");
-                        }
-                    }
-                    finally
-                    {
-                        ExcelHelpers.ReleaseCom(headerCell);
-                    }
-                }
-
-                usedRange = ws.UsedRange;
-                int lastRow = 1;
-                if (usedRange != null)
-                {
-                    try
-                    {
-                        lastRow = Math.Max(lastRow, usedRange.Row + usedRange.Rows.Count - 1);
-                    }
-                    catch
-                    {
-                        lastRow = 1;
-                    }
-                }
-
-                int totalRows = Math.Max(0, lastRow - 1);
-                progressCallback?.Invoke(0, totalRows, BuildExcelProgressStatus(0, totalRows));
-
-                int processedRows = 0;
-
-                for (int row = 2; row <= lastRow; row++)
-                {
-                    object[] rowValues = new object[columnCount];
-                    bool hasData = false;
-
-                    for (int col = 0; col < columnCount; col++)
-                    {
-                        Excel.Range cell = null;
-                        try
-                        {
-                            cell = (Excel.Range)ws.Cells[row, startColumn + col];
-                            object value = cell?.Value2;
-                            rowValues[col] = value;
-                            if (!IsNullOrEmptyExcel(value))
-                            {
-                                hasData = true;
-                            }
-                        }
-                        finally
-                        {
-                            ExcelHelpers.ReleaseCom(cell);
-                        }
-                    }
-
-                    processedRows++;
-                    int current = totalRows > 0 ? Math.Min(processedRows, totalRows) : processedRows;
-                    progressCallback?.Invoke(current, totalRows, BuildExcelProgressStatus(current, totalRows));
-
-                    if (!hasData)
-                    {
-                        continue;
-                    }
-
-                    data.AreaName.Add(TrimOrEmpty(rowValues[0]));
-                    data.LoadPattern.Add(TrimOrEmpty(rowValues[1]));
-                    data.CoordinateSystem.Add(TrimOrEmpty(rowValues[2]));
-                    data.Direction.Add(ParseNullableInt(rowValues[3]));
-                    data.Value.Add(ParseNullableDouble(rowValues[4]));
-                }
-
-                progressCallback?.Invoke(data.RowCount, data.RowCount, BuildExcelDoneStatus(data.RowCount));
-
-                return data;
-            }
-            finally
-            {
-                ExcelHelpers.ReleaseCom(usedRange);
-
-                if (wb != null)
-                {
-                    try { wb.Close(false); } catch { }
-                }
-
-                ExcelHelpers.ReleaseCom(ws);
-                ExcelHelpers.ReleaseCom(wb);
-                ExcelHelpers.ReleaseCom(books);
-
-                if (app != null)
-                {
-                    try { app.Quit(); } catch { }
-                }
-
-                ExcelHelpers.ReleaseCom(app);
-            }
-        }
-
-        private static Excel.Worksheet FindWorksheet(Excel.Workbook wb, string sheetName)
-        {
-            if (wb == null)
-            {
-                return null;
-            }
-
-            if (string.IsNullOrWhiteSpace(sheetName))
-            {
-                sheetName = "Sheet1";
-            }
-
-            Excel.Worksheet result = null;
-
-            for (int i = 1; i <= wb.Worksheets.Count; i++)
-            {
-                Excel.Worksheet candidate = null;
-                try
-                {
-                    candidate = (Excel.Worksheet)wb.Worksheets[i];
-                    if (candidate != null && string.Equals(candidate.Name, sheetName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        result = candidate;
-                        candidate = null;
-                        break;
-                    }
-                }
-                finally
-                {
-                    ExcelHelpers.ReleaseCom(candidate);
-                }
-            }
-
-            return result;
-        }
-
-        private static GH_Structure<GH_ObjectWrapper> BuildValueTree(ExcelLoadData data)
+        private static GH_Structure<GH_ObjectWrapper> BuildValueTree(AreaExcelData data)
         {
             GH_Structure<GH_ObjectWrapper> tree = new GH_Structure<GH_ObjectWrapper>();
 
@@ -531,84 +333,6 @@ namespace GhcETABSAPI
             }
         }
 
-        private static string TrimOrEmpty(object value)
-        {
-            if (value == null)
-            {
-                return string.Empty;
-            }
-
-            string s = Convert.ToString(value, CultureInfo.InvariantCulture);
-            return string.IsNullOrWhiteSpace(s) ? string.Empty : s.Trim();
-        }
-
-        private static bool IsNullOrEmptyExcel(object value)
-        {
-            if (value == null)
-            {
-                return true;
-            }
-
-            if (value is string s)
-            {
-                return string.IsNullOrWhiteSpace(s);
-            }
-
-            return false;
-        }
-
-        private static int? ParseNullableInt(object value)
-        {
-            if (value == null)
-            {
-                return 0;
-            }
-
-            if (value is double d)
-            {
-                return (int)Math.Round(d, MidpointRounding.AwayFromZero);
-            }
-
-            string s = TrimOrEmpty(value);
-            if (string.IsNullOrEmpty(s))
-            {
-                return null;
-            }
-
-            if (int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out int result))
-            {
-                return result;
-            }
-
-            return null;
-        }
-
-        private static double? ParseNullableDouble(object value)
-        {
-            if (value == null)
-            {
-                return 0;
-            }
-
-            if (value is double d)
-            {
-                return d;
-            }
-
-            string s = TrimOrEmpty(value);
-            if (string.IsNullOrEmpty(s))
-            {
-                return null;
-            }
-
-            if (double.TryParse(s, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out double result))
-            {
-                return result;
-            }
-
-            return null;
-        }
-
         private static string BuildProgressStatus(int assignedCount, int totalPrepared)
         {
             if (totalPrepared <= 0)
@@ -618,28 +342,6 @@ namespace GhcETABSAPI
 
             double percent = totalPrepared == 0 ? 0.0 : (assignedCount / (double)totalPrepared) * 100.0;
             return $"Assigned {assignedCount} of {totalPrepared} areas ({percent:0.##}%).";
-        }
-
-        private static string BuildExcelProgressStatus(int processedRows, int totalRows)
-        {
-            int safeProcessed = Math.Max(0, processedRows);
-            int safeTotal = Math.Max(0, totalRows);
-            if (safeTotal <= 0)
-            {
-                return $"Reading Excel ({safeProcessed})";
-            }
-
-            int clamped = Math.Min(safeProcessed, safeTotal);
-            double percent = (clamped / (double)safeTotal) * 100.0;
-            return $"Reading Excel {clamped} of {safeTotal} rows ({percent:0.##}%).";
-        }
-
-        private static string BuildExcelDoneStatus(int rowCount)
-        {
-            int safeCount = Math.Max(0, rowCount);
-            return safeCount == 1
-                ? "Excel Done (1 row)"
-                : $"Excel Done ({safeCount} rows)";
         }
 
         private readonly struct PreparedLoadAssignment
@@ -668,46 +370,6 @@ namespace GhcETABSAPI
             internal string CoordinateSystem { get; }
         }
 
-        private static HashSet<string> TryGetExistingAreaNames(cSapModel model)
-        {
-            if (model == null)
-            {
-                return null;
-            }
-
-            try
-            {
-                int count = 0;
-                string[] names = null;
-                int ret = model.AreaObj.GetNameList(ref count, ref names);
-                if (ret != 0)
-                {
-                    return null;
-                }
-
-                HashSet<string> result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (names == null)
-                {
-                    return result;
-                }
-
-                for (int i = 0; i < names.Length; i++)
-                {
-                    string nm = names[i];
-                    if (!string.IsNullOrWhiteSpace(nm))
-                    {
-                        result.Add(nm.Trim());
-                    }
-                }
-
-                return result;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
         private static void TryRefreshView(cSapModel model)
         {
             if (model == null)
@@ -726,15 +388,99 @@ namespace GhcETABSAPI
         }
     }
 
-    internal class ExcelLoadData
+    internal sealed class AreaExcelData
     {
-        public List<string> Headers { get; } = new List<string>();
-        public List<string> AreaName { get; } = new List<string>();
-        public List<string> LoadPattern { get; } = new List<string>();
-        public List<string> CoordinateSystem { get; } = new List<string>();
-        public List<int?> Direction { get; } = new List<int?>();
-        public List<double?> Value { get; } = new List<double?>();
+        private AreaExcelData()
+        {
+        }
 
-        public int RowCount => AreaName.Count;
+        internal static AreaExcelData Read(
+            string fullPath,
+            string sheetName,
+            Action<int, int, string> progressCallback)
+        {
+            const string expectedSheetName = "Assigned Loads On Areas";
+            string targetSheet = string.IsNullOrWhiteSpace(sheetName) ? expectedSheetName : sheetName;
+            if (!string.Equals(targetSheet, expectedSheetName, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Invalid workbook: expected sheet name '{expectedSheetName}'.");
+            }
+
+            string[] expectedHeaders =
+            {
+                "AreaName",
+                "LoadPattern",
+                "CoordinateSystem",
+                "Direction",
+                "Value"
+            };
+
+            ExcelSheetColumnarData table = ExcelHelpers.ReadColumnTable(
+                fullPath,
+                targetSheet,
+                2,
+                expectedHeaders,
+                progressCallback);
+
+            AreaExcelData data = new AreaExcelData();
+            data.Headers.AddRange(table.Headers);
+
+            int rowCount = table.RowCount;
+            List<object> areaNames = table.GetColumn(0);
+            List<object> loadPatterns = table.GetColumn(1);
+            List<object> coordinateSystems = table.GetColumn(2);
+            List<object> directions = table.GetColumn(3);
+            List<object> values = table.GetColumn(4);
+
+            for (int i = 0; i < rowCount; i++)
+            {
+                data.AreaName.Add(ExcelHelpers.TrimOrEmpty(areaNames[i]));
+                data.LoadPattern.Add(ExcelHelpers.TrimOrEmpty(loadPatterns[i]));
+                data.CoordinateSystem.Add(ExcelHelpers.TrimOrEmpty(coordinateSystems[i]));
+                data.Direction.Add(ParseNullableInt(directions[i]));
+                data.Value.Add(ParseNullableDouble(values[i]));
+            }
+
+            return data;
+        }
+
+        internal List<string> Headers { get; } = new List<string>();
+        internal List<string> AreaName { get; } = new List<string>();
+        internal List<string> LoadPattern { get; } = new List<string>();
+        internal List<string> CoordinateSystem { get; } = new List<string>();
+        internal List<int?> Direction { get; } = new List<int?>();
+        internal List<double?> Value { get; } = new List<double?>();
+
+        internal int RowCount => AreaName.Count;
+
+        private static int? ParseNullableInt(object value)
+        {
+            if (value == null)
+            {
+                return 0;
+            }
+
+            if (value is double d)
+            {
+                return (int)Math.Round(d, MidpointRounding.AwayFromZero);
+            }
+
+            return ExcelHelpers.ParseNullableInt(value);
+        }
+
+        private static double? ParseNullableDouble(object value)
+        {
+            if (value == null)
+            {
+                return 0.0;
+            }
+
+            if (value is double d)
+            {
+                return d;
+            }
+
+            return ExcelHelpers.ParseNullableDouble(value);
+        }
     }
 }

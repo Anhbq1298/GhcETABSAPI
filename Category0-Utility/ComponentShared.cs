@@ -66,6 +66,46 @@ namespace GhcETABSAPI
             }
         }
 
+        internal static HashSet<string> TryGetExistingAreaNames(cSapModel model)
+        {
+            if (model == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                int count = 0;
+                string[] names = null;
+                int ret = model.AreaObj.GetNameList(ref count, ref names);
+                if (ret != 0)
+                {
+                    return null;
+                }
+
+                HashSet<string> result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (names == null)
+                {
+                    return result;
+                }
+
+                for (int i = 0; i < names.Length; i++)
+                {
+                    string nm = names[i];
+                    if (!string.IsNullOrWhiteSpace(nm))
+                    {
+                        result.Add(nm.Trim());
+                    }
+                }
+
+                return result;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         internal static double Clamp01(double value)
         {
             if (value < 0.0)
