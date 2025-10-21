@@ -838,34 +838,19 @@ namespace GhcETABSAPI
 
             string trimmed = coordinateSystem.Trim();
 
-            if (string.Equals(trimmed, directionReference, StringComparison.OrdinalIgnoreCase))
-            {
-                return directionReference;
-            }
-
-            if (string.Equals(trimmed, "Local", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Local";
-            }
-
-            if (string.Equals(trimmed, "Global", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Global";
-            }
-
-            if (directionReference.Equals("Local", StringComparison.OrdinalIgnoreCase) &&
+            if (string.Equals(trimmed, "Local", StringComparison.OrdinalIgnoreCase) ||
                 trimmed.StartsWith("Local", StringComparison.OrdinalIgnoreCase))
             {
                 return "Local";
             }
 
-            if (directionReference.Equals("Global", StringComparison.OrdinalIgnoreCase) &&
+            if (string.Equals(trimmed, "Global", StringComparison.OrdinalIgnoreCase) ||
                 trimmed.StartsWith("Global", StringComparison.OrdinalIgnoreCase))
             {
                 return "Global";
             }
 
-            return trimmed;
+            return directionReference;
         }
 
         private static bool IsInvalidNumber(double value)
