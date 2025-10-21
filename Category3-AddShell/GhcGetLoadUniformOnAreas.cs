@@ -262,7 +262,7 @@ namespace GhcETABSAPI
                 {
                     string resolvedAreaName = areaName[i];
                     int direction = dir[i];
-                    string resolvedCoordinate = ComponentShared.ResolveDirectionReference(direction);
+                    string resolvedCoordinate = ComponentShared.ResolveDirectionReferenceArea(direction);
 
                     areaNameOut.Add(resolvedAreaName);
                     loadPatOut.Add(loadPat[i]);

@@ -101,6 +101,12 @@ namespace GhcETABSAPI
             return double.IsNaN(value) || double.IsInfinity(value);
         }
 
+        internal static string ResolveDirectionReferenceArea(int direction)
+        {
+            return Math.Abs(direction) < 4 ? "Local" : "Global";
+        }
+
+
         internal static double? TryGet(IList<double> source, int index)
         {
             if (source == null)

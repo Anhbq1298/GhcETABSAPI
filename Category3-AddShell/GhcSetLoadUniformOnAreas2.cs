@@ -280,7 +280,7 @@ namespace GhcETABSAPI
 
                 int direction = ClampDirCode(rawDirection.Value);
                 string resolvedCoordinate = string.IsNullOrEmpty(coordinateSystem)
-                    ? ResolveDirectionReference(direction)
+                    ? ResolveDirectionReferenceArea(direction)
                     : coordinateSystem;
 
                 excelData.AreaName[i] = areaName;
