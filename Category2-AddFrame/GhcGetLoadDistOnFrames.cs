@@ -23,6 +23,7 @@
 //       [0] FrameName, [1] LoadPattern, [2] Type, [3] CoordinateSystem, [4] Direction,
 //       [5] RelDist1, [6] RelDist2, [7] Dist1, [8] Dist2, [9] Value1, [10] Value2.
 //   • Uses per-object mode: FrameObj.GetLoadDistributed(..., eItemType.Objects).
+//   • CoordinateSystem is derived from Direction (|dir| < 10 ⇒ "Local", otherwise "Global").
 // -------------------------------------------------------------
 
 using System;
@@ -319,7 +320,8 @@ namespace GhcETABSAPI
                     frameNameOut.Add(frameName[i]);
                     loadPatOut.Add(loadPat[i]);
                     myTypeOut.Add(myType[i]);
-                    cSysOut.Add(cSys[i]);
+                    string directionReference = ResolveDirectionReference(dir[i]);
+                    cSysOut.Add(directionReference);
                     dirOut.Add(dir[i]);
                     rd1Out.Add(rd1[i]);
                     rd2Out.Add(rd2[i]);
@@ -399,6 +401,11 @@ namespace GhcETABSAPI
                 default:
                     throw new ArgumentOutOfRangeException(nameof(columnIndex));
             }
+        }
+
+        private static string ResolveDirectionReference(int direction)
+        {
+            return Math.Abs(direction) < 10 ? "Local" : "Global";
         }
 
         private static (int total, int failCount, List<string> frameName, List<string> loadPat, List<int> myType, List<string> cSys,
