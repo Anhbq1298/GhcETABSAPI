@@ -279,9 +279,8 @@ namespace GhcETABSAPI
                 }
 
                 int direction = ClampDirCode(rawDirection.Value);
-                string resolvedCoordinate = string.IsNullOrEmpty(coordinateSystem)
-                    ? ResolveDirectionReferenceArea(direction)
-                    : coordinateSystem;
+                string resolvedCoordinate = ResolveDirectionReference(direction);
+
 
                 excelData.AreaName[i] = areaName;
                 excelData.LoadPattern[i] = loadPattern;
