@@ -76,16 +76,19 @@ namespace GhcETABSAPI
         {
             p.AddBooleanParameter("run", "run", "Press to query (rising edge trigger).", GH_ParamAccess.item, false);
             p.AddGenericParameter("sapModel", "sapModel", "ETABS cSapModel from the Attach component.", GH_ParamAccess.item);
-            p.AddTextParameter(
+            int frameNameIndex = p.AddTextParameter(
                 "frameNames",
                 "frameNames",
                 "Frame object names to query. Blank entries are ignored. If empty, returns zero results.",
                 GH_ParamAccess.list);
-            p.AddTextParameter(
+            p[frameNameIndex].Optional = true;
+
+            int loadPatternIndex = p.AddTextParameter(
                 "loadPatterns",
                 "loadPatterns",
                 "Optional load pattern filters. Leave empty to return all load patterns.",
                 GH_ParamAccess.list);
+            p[loadPatternIndex].Optional = true;
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager p)

@@ -519,6 +519,8 @@ namespace GhcETABSAPI
             Excel.Worksheet ws = null;
             Excel.Range range = null, topLeft = null, bottomRight = null;
             Excel.Range headerRight = null, headerRow = null;
+            Excel.Range lastUsed = null, sheetEnd = null, clearRange = null;
+            Excel.Range dataRange = null;
 
             try
             {
@@ -531,6 +533,20 @@ namespace GhcETABSAPI
 
                 ws = GetOrCreateWorksheet(wb, worksheetName);
                 if (ws == null) return "Failed to access worksheet.";
+
+                // --- NEW: normalize start and clear contents from start → end ---
+                startRow = Math.Max(1, startRow);
+                startColumn = Math.Max(1, startColumn);
+                topLeft = (Excel.Range)ws.Cells[startRow, startColumn];
+
+                // Force Excel to update UsedRange, then try LastCell
+                try { var _ = ws.UsedRange; } catch { }
+                try { lastUsed = ws.Cells.SpecialCells(Excel.XlCellType.xlCellTypeLastCell) as Excel.Range; } catch { lastUsed = null; }
+                sheetEnd = lastUsed ?? (Excel.Range)ws.Cells[ws.Rows.Count, ws.Columns.Count];
+
+                clearRange = ws.Range[topLeft, sheetEnd];
+                try { clearRange.ClearContents(); } catch { /* ignore */ }
+                // --- END NEW ---
 
                 var columnKeys = new List<string>();
                 if (columnOrder != null && columnOrder.Count > 0)
@@ -549,7 +565,7 @@ namespace GhcETABSAPI
                 int totalRows = Math.Max(1, maxRows + 1); // +1 header
                 var values = new object[totalRows, colCount];
 
-                for (c = 0; c < colCount; c++)
+                for ( c = 0; c < colCount; c++)
                 {
                     string key = columnKeys[c] ?? string.Empty;
                     string headerLabel = (headers != null && c < headers.Count && !string.IsNullOrWhiteSpace(headers[c]))
@@ -563,25 +579,33 @@ namespace GhcETABSAPI
                         values[r2 + 1, c] = branch[r2];
                 }
 
-                startRow = Math.Max(1, startRow);
-                startColumn = Math.Max(1, startColumn);
-
-                topLeft = (Excel.Range)ws.Cells[startRow, startColumn];
                 bottomRight = (Excel.Range)ws.Cells[startRow + totalRows - 1, startColumn + colCount - 1];
                 range = ws.Range[topLeft, bottomRight];
                 range.Value2 = values;
 
-                // Bold header
+                //Header formatting (bold + light blue)
                 try
                 {
                     headerRight = (Excel.Range)ws.Cells[startRow, startColumn + colCount - 1];
                     headerRow = ws.Range[topLeft, headerRight];
+
                     headerRow.Font.Bold = true;
+                    headerRow.Interior.Pattern = Excel.XlPattern.xlPatternSolid;
+                    headerRow.Interior.Color = System.Drawing.ColorTranslator.ToOle(
+                        System.Drawing.Color.FromArgb(221, 235, 247) // Excel light blue (#DDEBF7)
+                    );
                 }
                 finally
                 {
                     ReleaseCom(headerRow);
                     ReleaseCom(headerRight);
+                }
+
+                //Ensure ONLY header is formatted → clear formats on data rows
+                if (totalRows > 1)
+                {
+                    dataRange = ws.Range[ws.Cells[startRow + 1, startColumn], bottomRight];
+                    try { dataRange.ClearFormats(); } catch { /* ignore */ }
                 }
 
                 // Activate & maximize, focus starting cell
@@ -605,8 +629,8 @@ namespace GhcETABSAPI
                     : ColumnNumberToLetters(startColumn) + Math.Max(1, startRow).ToString(CultureInfo.InvariantCulture);
 
                 return string.Format(CultureInfo.InvariantCulture,
-                    "Wrote {0} columns × {1} rows to '{2}' starting at {3}; header bolded and focused there.",
-                    colCount, totalRows, wsName, startLabel);
+                    "Cleared from {0} to sheet end, then wrote {1} columns × {2} rows to '{3}' starting at {0}; header bolded.",
+                    startLabel, colCount, totalRows, wsName);
             }
             catch (Exception ex)
             {
@@ -614,9 +638,13 @@ namespace GhcETABSAPI
             }
             finally
             {
+                ReleaseCom(clearRange);
+                ReleaseCom(sheetEnd);
+                ReleaseCom(lastUsed);
                 ReleaseCom(range);
                 ReleaseCom(topLeft);
                 ReleaseCom(bottomRight);
+                ReleaseCom(dataRange);
                 ReleaseCom(ws);
             }
         }
