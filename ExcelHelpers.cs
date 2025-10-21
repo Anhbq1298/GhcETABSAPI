@@ -2,13 +2,10 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
 using System.Text;
-using System.Threading.Tasks;
 using Excel = Microsoft.Office.Interop.Excel;
-using Microsoft.CSharp.RuntimeBinder;
-using Microsoft.VisualBasic;
 
 
 
@@ -79,52 +76,83 @@ namespace GhcETABSAPI
                 if (string.IsNullOrWhiteSpace(path)) return false;
                 string fullPath = Path.GetFullPath(path);
 
-                // 0) Try to attach to any running Excel instance
-                Excel.Application runningApp = null;
-                try { runningApp = Interaction.GetObject(null, "Excel.Application") as Excel.Application; }
-                catch { runningApp = null; }
+                // 0) Try to attach to any running Excel instances
+                var runningApps = GetRunningExcelApplications();
+
+                Excel.Application matchedApp = null;
+                Excel.Workbook matchedWorkbook = null;
 
                 // 1) If Excel is running, see if the target workbook is already open there
-                if (runningApp != null)
+                if (runningApps != null && runningApps.Count > 0)
                 {
-                    try
+                    foreach (var existingApp in runningApps)
                     {
-                        foreach (Excel.Workbook candidate in runningApp.Workbooks)
+                        if (existingApp == null) continue;
+
+                        Excel.Workbooks openWorkbooks = null;
+                        try
                         {
-                            if (candidate == null) continue;
-
-                            string candidatePath = null;
-                            try { candidatePath = candidate.FullName; } catch { candidatePath = null; }
-                            if (string.IsNullOrWhiteSpace(candidatePath)) continue;
-
-                            string candidateFullPath;
-                            try { candidateFullPath = Path.GetFullPath(candidatePath); }
-                            catch { candidateFullPath = candidatePath; }
-
-                            if (string.Equals(candidateFullPath, fullPath, StringComparison.OrdinalIgnoreCase))
+                            openWorkbooks = existingApp.Workbooks;
+                            foreach (Excel.Workbook candidate in openWorkbooks)
                             {
-                                // Found an already open workbook → attach and return (DO NOT open again)
-                                app = runningApp;
-                                wb = candidate;
+                                if (candidate == null) continue;
 
-                                try
+                                bool matched = false;
+                                string candidatePath = null;
+                                try { candidatePath = candidate.FullName; } catch { candidatePath = null; }
+                                if (!string.IsNullOrWhiteSpace(candidatePath))
                                 {
-                                    if (visible) { app.Visible = true; app.UserControl = true; }
-                                    wb.Activate();
-                                }
-                                catch { /* no-op */ }
+                                    string candidateFullPath;
+                                    try { candidateFullPath = Path.GetFullPath(candidatePath); }
+                                    catch { candidateFullPath = candidatePath; }
 
-                                return false; // did not create a new Excel application
+                                    matched = string.Equals(candidateFullPath, fullPath, StringComparison.OrdinalIgnoreCase);
+                                }
+
+                                if (matched)
+                                {
+                                    matchedApp = existingApp;
+                                    matchedWorkbook = candidate;
+                                    break;
+                                }
+
+                                ReleaseCom(candidate);
                             }
                         }
+                        catch { /* ignore and continue */ }
+                        finally
+                        {
+                            ReleaseCom(openWorkbooks);
+                        }
+
+                        if (matchedWorkbook != null)
+                        {
+                            break;
+                        }
                     }
-                    catch { /* ignore and continue to open below */ }
+                }
+
+                if (matchedWorkbook != null && matchedApp != null)
+                {
+                    app = matchedApp;
+                    wb = matchedWorkbook;
+
+                    try
+                    {
+                        if (visible) { app.Visible = true; app.UserControl = true; }
+                        wb.Activate();
+                    }
+                    catch { /* no-op */ }
+
+                    ReleaseOtherExcelApplications(runningApps, matchedApp);
+                    return false; // did not create a new Excel application
                 }
 
                 // 2) No open copy found → reuse running Excel or create a new instance
-                if (runningApp != null)
+                if (runningApps != null && runningApps.Count > 0)
                 {
-                    app = runningApp;
+                    app = runningApps[0];
+                    ReleaseOtherExcelApplications(runningApps, app);
                 }
                 else
                 {
@@ -189,6 +217,114 @@ namespace GhcETABSAPI
                 catch { /* no-op */ }
 
                 return createdApplication; // true if we spawned a new Excel.exe, else false
+            }
+        }
+
+        private static List<Excel.Application> GetRunningExcelApplications()
+        {
+            List<Excel.Application> results = new List<Excel.Application>();
+            Exception capturedError = null;
+
+            IRunningObjectTable rot = null;
+            IEnumMoniker enumerator = null;
+            IBindCtx bindCtx = null;
+
+            try
+            {
+                Marshal.ThrowExceptionForHR(GetRunningObjectTable(0, out rot));
+                Marshal.ThrowExceptionForHR(CreateBindCtx(0, out bindCtx));
+
+                rot.EnumRunning(out enumerator);
+                var monikers = new IMoniker[1];
+
+                while (enumerator != null && enumerator.Next(1, monikers, IntPtr.Zero) == 0)
+                {
+                    var moniker = monikers[0];
+                    monikers[0] = null;
+
+                    if (moniker == null)
+                        continue;
+
+                    try
+                    {
+                        string displayName = null;
+                        try
+                        {
+                            moniker.GetDisplayName(bindCtx, null, out displayName);
+                        }
+                        catch (Exception ex)
+                        {
+                            capturedError = ex;
+                            displayName = null;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(displayName) ||
+                            displayName.IndexOf("Excel.Application", StringComparison.OrdinalIgnoreCase) < 0)
+                        {
+                            continue;
+                        }
+
+                        object candidate = null;
+                        try
+                        {
+                            rot.GetObject(moniker, out candidate);
+                        }
+                        catch (Exception ex)
+                        {
+                            capturedError = ex;
+                            candidate = null;
+                        }
+
+                        if (candidate is Excel.Application excelApp)
+                        {
+                            if (!results.Contains(excelApp))
+                                results.Add(excelApp);
+                        }
+                        else
+                        {
+                            ReleaseCom(candidate);
+                        }
+                    }
+                    finally
+                    {
+                        ReleaseCom(moniker);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                capturedError = ex;
+            }
+            finally
+            {
+                ReleaseCom(enumerator);
+                ReleaseCom(rot);
+                ReleaseCom(bindCtx);
+            }
+
+            if (results.Count == 0 && capturedError != null)
+            {
+                System.Diagnostics.Debug.WriteLine($"Unable to attach to running Excel instance: {capturedError}");
+            }
+
+            return results;
+        }
+
+        [DllImport("ole32.dll")]
+        private static extern int GetRunningObjectTable(int reserved, out IRunningObjectTable pprot);
+
+        [DllImport("ole32.dll")]
+        private static extern int CreateBindCtx(int reserved, out IBindCtx ppbc);
+
+        private static void ReleaseOtherExcelApplications(List<Excel.Application> apps, Excel.Application keep)
+        {
+            if (apps == null) return;
+
+            foreach (var instance in apps)
+            {
+                if (instance == null) continue;
+                if (keep != null && ReferenceEquals(instance, keep)) continue;
+                ReleaseCom(instance);
             }
         }
 
