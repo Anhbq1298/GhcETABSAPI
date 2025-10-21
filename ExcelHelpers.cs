@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using Excel = Microsoft.Office.Interop.Excel;
+using Grasshopper;
 using Microsoft.VisualBasic;
 
 namespace GhcETABSAPI
@@ -18,7 +19,8 @@ namespace GhcETABSAPI
         private static readonly object _excelLock = new object();
 
         /// <summary>
-        /// Convert a relative path to full path using AppDomain.BaseDirectory.
+        /// Convert a relative path to full path using the Grasshopper document directory when available,
+        /// otherwise AppDomain.BaseDirectory.
         /// Returns full path if input is already absolute; null/empty stays null.
         /// </summary>
         internal static string ProjectRelative(string filePathOrRelative)
@@ -29,7 +31,7 @@ namespace GhcETABSAPI
                 if (Path.IsPathRooted(filePathOrRelative))
                     return Path.GetFullPath(filePathOrRelative);
 
-                string baseDir = AppDomain.CurrentDomain.BaseDirectory; // e.g. bin\Debug
+                string baseDir = GetGrasshopperDocumentDirectory() ?? AppDomain.CurrentDomain.BaseDirectory; // prefer GH document dir
                 return Path.GetFullPath(Path.Combine(baseDir, filePathOrRelative));
             }
             catch
@@ -53,7 +55,8 @@ namespace GhcETABSAPI
 
         /// <summary>
         /// Force-restart Excel: if a running instance exists, close it completely (discard unsaved),
-        /// then start a fresh Excel instance and open the workbook at 'filePathOrRelative'.
+        /// then start a fresh Excel instance. Opens the workbook at 'filePathOrRelative' when supplied,
+        /// otherwise creates a new workbook saved beside the active Grasshopper definition when possible.
         /// Returns true if a new Excel Application was created (always true on success with this strategy).
         /// </summary>
         internal static bool AttachOrOpenWorkbook(
@@ -68,12 +71,23 @@ namespace GhcETABSAPI
                 app = null;
                 wb = null;
 
-                // Resolve full path and validate existence (avoid Excel popups)
-                string path = ProjectRelative(filePathOrRelative);
-                if (string.IsNullOrWhiteSpace(path)) return false;
+                // Resolve full path and validate existence when opening an existing workbook
+                bool createNew = string.IsNullOrWhiteSpace(filePathOrRelative);
+                string path = createNew
+                    ? GetDefaultWorkbookPath()
+                    : ProjectRelative(filePathOrRelative);
+                if (!createNew)
+                {
+                    if (string.IsNullOrWhiteSpace(path)) return false;
 
-                string fullPath = Path.GetFullPath(path);
-                if (!File.Exists(fullPath)) return false;
+                    string fullPathExisting = Path.GetFullPath(path);
+                    if (!File.Exists(fullPathExisting)) return false;
+                    path = fullPathExisting;
+                }
+                else if (!string.IsNullOrWhiteSpace(path))
+                {
+                    path = Path.GetFullPath(path);
+                }
 
                 // 0) If an Excel instance is running, close it completely to start clean.
                 var running = TryGetRunningExcelApplication();
@@ -95,21 +109,40 @@ namespace GhcETABSAPI
 
                     try
                     {
-                        wb = app.Workbooks.Open(
-                            Filename: fullPath,
-                            UpdateLinks: 0,
-                            ReadOnly: readOnly,
-                            IgnoreReadOnlyRecommended: true,
-                            AddToMru: false
-                        );
+                        if (createNew)
+                        {
+                            wb = app.Workbooks.Add();
+                            TryEnsureWorkbookDirectory(path);
+                            if (!string.IsNullOrWhiteSpace(path))
+                            {
+                                try
+                                {
+                                    wb.SaveAs(Filename: path);
+                                }
+                                catch
+                                {
+                                    // keep workbook unsaved if SaveAs fails
+                                }
+                            }
+                        }
+                        else
+                        {
+                            wb = app.Workbooks.Open(
+                                Filename: path,
+                                UpdateLinks: 0,
+                                ReadOnly: readOnly,
+                                IgnoreReadOnlyRecommended: true,
+                                AddToMru: false
+                            );
+                        }
                     }
                     catch
                     {
-                        // Fallback: try read-only once
-                        if (!readOnly)
+                        // Fallback: try read-only once when opening existing workbook
+                        if (!createNew && !readOnly)
                         {
                             wb = app.Workbooks.Open(
-                                Filename: fullPath,
+                                Filename: path,
                                 UpdateLinks: 0,
                                 ReadOnly: true,
                                 IgnoreReadOnlyRecommended: true,
@@ -508,6 +541,57 @@ namespace GhcETABSAPI
             }
 
             return builder.Length > 0 ? builder.ToString() : "A";
+        }
+
+        private static string GetGrasshopperDocumentDirectory()
+        {
+            try
+            {
+                var doc = Instances?.ActiveCanvas?.Document;
+                string ghPath = doc?.FilePath;
+                if (!string.IsNullOrWhiteSpace(ghPath))
+                {
+                    string dir = Path.GetDirectoryName(ghPath);
+                    if (!string.IsNullOrWhiteSpace(dir))
+                        return dir;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static string GetDefaultWorkbookPath()
+        {
+            string baseDir = GetGrasshopperDocumentDirectory() ?? AppDomain.CurrentDomain.BaseDirectory;
+            string fileName = "GrasshopperExport.xlsx";
+
+            try
+            {
+                var doc = Instances?.ActiveCanvas?.Document;
+                string ghPath = doc?.FilePath;
+                if (!string.IsNullOrWhiteSpace(ghPath))
+                {
+                    string name = Path.GetFileNameWithoutExtension(ghPath);
+                    if (!string.IsNullOrWhiteSpace(name))
+                        fileName = name + ".xlsx";
+                }
+            }
+            catch { }
+
+            return Path.Combine(baseDir, fileName);
+        }
+
+        private static void TryEnsureWorkbookDirectory(string path)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(path)) return;
+                string dir = Path.GetDirectoryName(path);
+                if (string.IsNullOrWhiteSpace(dir)) return;
+                if (!Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+            }
+            catch { }
         }
     }
 }

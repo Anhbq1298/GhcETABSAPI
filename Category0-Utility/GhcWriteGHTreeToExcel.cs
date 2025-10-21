@@ -136,10 +136,7 @@ namespace GhcETABSAPI
             }
 
             if (string.IsNullOrWhiteSpace(workbookPath))
-            {
-                Finish(da, add, "Workbook path is empty.");
-                return;
-            }
+                workbookPath = null;
 
             if (!TryParseAddress(address, out int startRow, out int startColumn))
             {
