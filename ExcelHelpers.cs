@@ -78,33 +78,78 @@ namespace GhcETABSAPI
 
                 string fullPath = Path.GetFullPath(path);
 
-                // 1) Try bind to an *already-open* workbook by FILE (no Excel option changes)
+                Excel.Application runningApp = null;
                 try
                 {
-                    if (File.Exists(fullPath))
-                    {
-                        var obj = Interaction.GetObject(fullPath);    // attaches if that workbook is open
-                        wb = obj as Excel.Workbook;                   // OR starts Excel & opens file if not already open
-                        if (wb != null) app = wb.Application;
-                    }
+                    runningApp = Marshal.GetActiveObject("Excel.Application") as Excel.Application;
                 }
-                catch
-                {
-                    wb = null; app = null; // ignore and fall through
-                }
+                catch { runningApp = null; }
 
-                // 2) If not bound, create our own Excel and open / create workbook
-                if (wb == null || app == null)
+                // 1) Try to find workbook in an existing Excel instance
+                if (runningApp != null)
                 {
-                    app = new Excel.Application();
-                    createdApplication = true;
-
                     try
                     {
-                        app.Visible = visible;
-                        if (visible) app.UserControl = true;
+                        foreach (Excel.Workbook candidate in runningApp.Workbooks)
+                        {
+                            if (candidate == null) continue;
+                            string candidatePath = null;
+                            try { candidatePath = candidate.FullName; }
+                            catch { candidatePath = null; }
+
+                            if (string.IsNullOrWhiteSpace(candidatePath)) continue;
+
+                            string candidateFullPath;
+                            try { candidateFullPath = Path.GetFullPath(candidatePath); }
+                            catch { candidateFullPath = candidatePath; }
+
+                            if (string.Equals(candidateFullPath, fullPath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                wb = candidate;
+                                app = runningApp;
+                                break;
+                            }
+                        }
                     }
-                    catch { }
+                    catch { wb = null; app = null; }
+                }
+
+                // 2) Try bind to an *already-open* workbook by FILE (no Excel option changes)
+                if (wb == null || app == null)
+                {
+                    try
+                    {
+                        if (File.Exists(fullPath))
+                        {
+                            var obj = Interaction.GetObject(fullPath);    // attaches if that workbook is open
+                            wb = obj as Excel.Workbook;                   // OR starts Excel & opens file if not already open
+                            if (wb != null) app = wb.Application;
+                        }
+                    }
+                    catch
+                    {
+                        wb = null; app = null; // ignore and fall through
+                    }
+                }
+
+                // 3) If still not bound, reuse running instance or create a new one
+                if (wb == null || app == null)
+                {
+                    if (runningApp != null)
+                    {
+                        app = runningApp;
+                    }
+                    else
+                    {
+                        app = new Excel.Application();
+                        createdApplication = true;
+                        try
+                        {
+                            app.Visible = visible;
+                            if (visible) app.UserControl = true;
+                        }
+                        catch { }
+                    }
 
                     if (File.Exists(fullPath))
                     {
@@ -123,7 +168,7 @@ namespace GhcETABSAPI
                     }
                 }
 
-                // 3) Finish
+                // 4) Finish
                 try { if (visible) app.Visible = true; } catch { }
                 try { wb.Activate(); } catch { }
 
