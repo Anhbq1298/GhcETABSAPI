@@ -101,7 +101,7 @@ namespace GhcETABSAPI
             }
 
             GH_Structure<IGH_Goo> tree = null;
-            string workbookPath = "TreeExport.xlsx";
+            string workbookPath = null;
             string worksheetName = "Sheet1";
             string address = "A1";
             bool visible = true;
@@ -128,18 +128,6 @@ namespace GhcETABSAPI
             }
 
             string message;
-
-            if (tree == null || tree.PathCount == 0)
-            {
-                Finish(da, add, "Tree is empty.");
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(workbookPath))
-            {
-                Finish(da, add, "Workbook path is empty.");
-                return;
-            }
 
             if (!TryParseAddress(address, out int startRow, out int startColumn))
             {
