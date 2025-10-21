@@ -165,7 +165,7 @@ namespace GhcETABSAPI
                         continue;
                     }
 
-                    HashSet<LoadKey> processedKeys = new HashSet<LoadKey>();
+                    HashSet<string> processedPatterns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                     foreach (UniformLoadEntry entry in loadResult.entries)
                     {
@@ -176,15 +176,15 @@ namespace GhcETABSAPI
                             continue;
                         }
 
-                        LoadKey key = new LoadKey(entryPattern, entry.Direction);
-                        if (!processedKeys.Add(key))
+                        string normalizedPattern = entryPattern ?? string.Empty;
+                        if (!processedPatterns.Add(normalizedPattern))
                         {
                             continue;
                         }
 
                         targetedLoads++;
 
-                        if (TryDeleteLoad(sapModel, areaName, entryPattern, entry.Direction))
+                        if (TryDeleteLoad(sapModel, areaName, normalizedPattern))
                         {
                             removedLoads++;
                             areasModified.Add(areaName);
@@ -192,7 +192,7 @@ namespace GhcETABSAPI
                         else
                         {
                             failedRemovals++;
-                            failedAssignments.Add($"{areaName}:{entryPattern}:{entry.Direction}");
+                            failedAssignments.Add($"{areaName}:{normalizedPattern}");
                         }
                     }
                 }
@@ -220,7 +220,7 @@ namespace GhcETABSAPI
 
                 if (failedRemovals > 0)
                 {
-                    messages.Add("Failed removals (area:pattern:direction): " + string.Join(", ", failedAssignments));
+                    messages.Add("Failed removals (area:pattern): " + string.Join(", ", failedAssignments));
                 }
 
                 if (areasMissing > 0)
@@ -312,7 +312,6 @@ namespace GhcETABSAPI
                         AreaName = areaName,
                         LoadPattern = pattern,
                         CoordinateSystem = SafeArrayValue(coordinateSystems, i),
-                        Direction = SafeArrayValue(directions, i),
                         Value = SafeArrayValue(values, i)
                     };
 
@@ -327,7 +326,7 @@ namespace GhcETABSAPI
             }
         }
 
-        private static bool TryDeleteLoad(cSapModel model, string areaName, string loadPattern, int direction)
+        private static bool TryDeleteLoad(cSapModel model, string areaName, string loadPattern)
         {
             if (model == null)
             {
@@ -339,7 +338,6 @@ namespace GhcETABSAPI
                 int ret = model.AreaObj.DeleteLoadUniform(
                     areaName ?? string.Empty,
                     loadPattern ?? string.Empty,
-                    direction,
                     eItemType.Objects);
 
                 return ret == 0;
@@ -373,16 +371,6 @@ namespace GhcETABSAPI
             }
 
             return source[index] ?? string.Empty;
-        }
-
-        private static int SafeArrayValue(int[] source, int index)
-        {
-            if (source == null || index < 0 || index >= source.Length)
-            {
-                return 0;
-            }
-
-            return source[index];
         }
 
         private static double SafeArrayValue(double[] source, int index)
@@ -441,41 +429,11 @@ namespace GhcETABSAPI
             }
         }
 
-        private readonly struct LoadKey : IEquatable<LoadKey>
-        {
-            private readonly string _pattern;
-            private readonly int _direction;
-
-            public LoadKey(string pattern, int direction)
-            {
-                _pattern = pattern ?? string.Empty;
-                _direction = direction;
-            }
-
-            public bool Equals(LoadKey other)
-            {
-                return string.Equals(_pattern, other._pattern, StringComparison.OrdinalIgnoreCase)
-                    && _direction == other._direction;
-            }
-
-            public override bool Equals(object obj)
-            {
-                return obj is LoadKey other && Equals(other);
-            }
-
-            public override int GetHashCode()
-            {
-                int hash = StringComparer.OrdinalIgnoreCase.GetHashCode(_pattern ?? string.Empty);
-                return (hash * 397) ^ _direction;
-            }
-        }
-
         private class UniformLoadEntry
         {
             public string AreaName { get; set; }
             public string LoadPattern { get; set; }
             public string CoordinateSystem { get; set; }
-            public int Direction { get; set; }
             public double Value { get; set; }
         }
     }
