@@ -12,9 +12,24 @@ namespace GhcETABSAPI
 
         internal static void ShowProgressBar(string title, string initialStatus, int maximum)
         {
-            if (maximum < 0)
+            ShowDualProgressBar(title, string.Empty, 0, initialStatus, maximum);
+        }
+
+        internal static void ShowDualProgressBar(
+            string title,
+            string excelStatus,
+            int excelMaximum,
+            string assignmentStatus,
+            int assignmentMaximum)
+        {
+            if (excelMaximum < 0)
             {
-                maximum = 0;
+                excelMaximum = 0;
+            }
+
+            if (assignmentMaximum < 0)
+            {
+                assignmentMaximum = 0;
             }
 
             RunOnUiThread(() =>
@@ -24,7 +39,7 @@ namespace GhcETABSAPI
                     EnsureWindow();
 
                     _progressWindow.Text = string.IsNullOrWhiteSpace(title) ? "Progress" : title;
-                    _progressWindow.UpdateProgress(0, maximum, initialStatus);
+                    _progressWindow.InitializeDual(excelStatus, excelMaximum, assignmentStatus, assignmentMaximum);
 
                     if (!_progressWindow.Visible)
                     {
@@ -50,6 +65,11 @@ namespace GhcETABSAPI
 
         internal static void UpdateProgressBar(int value, int maximum, string status)
         {
+            UpdateAssignmentProgressBar(value, maximum, status);
+        }
+
+        internal static void UpdateExcelProgressBar(int value, int maximum, string status)
+        {
             if (maximum < 0)
             {
                 maximum = 0;
@@ -64,7 +84,28 @@ namespace GhcETABSAPI
                         return;
                     }
 
-                    _progressWindow.UpdateProgress(value, maximum, status);
+                    _progressWindow.UpdateExcelProgress(value, maximum, status);
+                }
+            });
+        }
+
+        internal static void UpdateAssignmentProgressBar(int value, int maximum, string status)
+        {
+            if (maximum < 0)
+            {
+                maximum = 0;
+            }
+
+            RunOnUiThread(() =>
+            {
+                lock (_syncRoot)
+                {
+                    if (_progressWindow == null || _progressWindow.IsDisposed)
+                    {
+                        return;
+                    }
+
+                    _progressWindow.UpdateAssignmentProgress(value, maximum, status);
                 }
             });
         }
@@ -163,8 +204,10 @@ namespace GhcETABSAPI
 
         private sealed class ProgressWindow : Form
         {
-            private readonly Label _statusLabel;
-            private readonly ProgressBar _progressBar;
+            private readonly Label _excelStatusLabel;
+            private readonly ProgressBar _excelProgressBar;
+            private readonly Label _assignmentStatusLabel;
+            private readonly ProgressBar _assignmentProgressBar;
 
             internal ProgressWindow()
             {
@@ -174,57 +217,137 @@ namespace GhcETABSAPI
                 ShowInTaskbar = false;
                 ControlBox = false;
                 TopMost = false;
-                Size = new Size(360, 120);
+                Size = new Size(380, 170);
                 Padding = new Padding(12);
 
-                _statusLabel = new Label
+                TableLayoutPanel layout = new TableLayoutPanel
                 {
-                    Dock = DockStyle.Top,
-                    Height = 40,
-                    AutoSize = false,
-                    TextAlign = ContentAlignment.MiddleLeft,
-                    Text = "Working..."
+                    Dock = DockStyle.Fill,
+                    ColumnCount = 1,
+                    RowCount = 4,
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink
                 };
 
-                _progressBar = new ProgressBar
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+                _excelStatusLabel = new Label
                 {
-                    Dock = DockStyle.Top,
-                    Height = 24,
+                    Dock = DockStyle.Fill,
+                    AutoSize = true,
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    Margin = new Padding(0, 0, 0, 4)
+                };
+
+                _excelProgressBar = new ProgressBar
+                {
+                    Dock = DockStyle.Fill,
+                    Height = 20,
                     Style = ProgressBarStyle.Continuous,
                     Minimum = 0,
-                    Maximum = 1
+                    Maximum = 1,
+                    Margin = new Padding(0, 0, 0, 12)
                 };
 
-                Controls.Add(_progressBar);
-                Controls.Add(_statusLabel);
+                _assignmentStatusLabel = new Label
+                {
+                    Dock = DockStyle.Fill,
+                    AutoSize = true,
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    Margin = new Padding(0, 0, 0, 4)
+                };
+
+                _assignmentProgressBar = new ProgressBar
+                {
+                    Dock = DockStyle.Fill,
+                    Height = 20,
+                    Style = ProgressBarStyle.Continuous,
+                    Minimum = 0,
+                    Maximum = 1,
+                    Margin = new Padding(0)
+                };
+
+                layout.Controls.Add(_excelStatusLabel, 0, 0);
+                layout.Controls.Add(_excelProgressBar, 0, 1);
+                layout.Controls.Add(_assignmentStatusLabel, 0, 2);
+                layout.Controls.Add(_assignmentProgressBar, 0, 3);
+
+                Controls.Add(layout);
+
+                HideExcelSection();
+                HideAssignmentSection();
             }
 
-            internal void UpdateProgress(int currentValue, int maximum, string status)
+            internal void InitializeDual(string excelStatus, int excelMaximum, string assignmentStatus, int assignmentMaximum)
             {
-                int displayMax = Math.Max(1, maximum);
-                if (_progressBar.Maximum != displayMax)
+                UpdateExcelProgress(0, excelMaximum, excelStatus);
+                UpdateAssignmentProgress(0, assignmentMaximum, assignmentStatus);
+            }
+
+            internal void UpdateExcelProgress(int value, int maximum, string status)
+            {
+                UpdateSection(_excelStatusLabel, _excelProgressBar, value, maximum, status, HideExcelSection);
+            }
+
+            internal void UpdateAssignmentProgress(int value, int maximum, string status)
+            {
+                UpdateSection(_assignmentStatusLabel, _assignmentProgressBar, value, maximum, status, HideAssignmentSection);
+            }
+
+            private void UpdateSection(
+                Label statusLabel,
+                ProgressBar progressBar,
+                int value,
+                int maximum,
+                string status,
+                Action hideAction)
+            {
+                bool shouldShow = !string.IsNullOrWhiteSpace(status) || maximum > 0;
+                if (!shouldShow)
                 {
-                    _progressBar.Maximum = displayMax;
+                    hideAction();
+                    return;
                 }
 
-                int clamped = Math.Max(_progressBar.Minimum, Math.Min(currentValue, displayMax));
+                statusLabel.Visible = true;
+                progressBar.Visible = true;
+
+                int safeMaximum = Math.Max(1, maximum);
+                if (progressBar.Maximum != safeMaximum)
+                {
+                    progressBar.Maximum = safeMaximum;
+                }
+
+                int clamped = Math.Max(progressBar.Minimum, Math.Min(value, safeMaximum));
                 try
                 {
-                    _progressBar.Value = clamped;
+                    progressBar.Value = clamped;
                 }
                 catch
                 {
-                    _progressBar.Value = _progressBar.Minimum;
+                    progressBar.Value = progressBar.Minimum;
                 }
 
-                if (!string.IsNullOrWhiteSpace(status))
-                {
-                    _statusLabel.Text = status;
-                }
-                else if (string.IsNullOrWhiteSpace(_statusLabel.Text))
-                {
-                    _statusLabel.Text = "Working...";
-                }
+                statusLabel.Text = string.IsNullOrWhiteSpace(status) ? string.Empty : status;
+            }
+
+            private void HideExcelSection()
+            {
+                _excelStatusLabel.Visible = false;
+                _excelStatusLabel.Text = string.Empty;
+                _excelProgressBar.Visible = false;
+                _excelProgressBar.Value = 0;
+            }
+
+            private void HideAssignmentSection()
+            {
+                _assignmentStatusLabel.Visible = false;
+                _assignmentStatusLabel.Text = string.Empty;
+                _assignmentProgressBar.Visible = false;
+                _assignmentProgressBar.Value = 0;
             }
         }
     }
