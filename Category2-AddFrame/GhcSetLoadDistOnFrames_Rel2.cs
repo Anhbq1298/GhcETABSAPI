@@ -294,7 +294,6 @@ namespace GhcETABSAPI
                 double? rawDist2 = excelData.Dist2[i];
                 double? rawVal1 = excelData.Value1[i];
                 double? rawVal2 = excelData.Value2[i];
-                string coordinateOverride = TrimOrEmpty(excelData.CoordinateSystem[i]);
 
                 bool hasRelDistances = rawRelDist1.HasValue && rawRelDist2.HasValue &&
                     !IsInvalidNumber(rawRelDist1.Value) && !IsInvalidNumber(rawRelDist2.Value);
@@ -356,7 +355,7 @@ namespace GhcETABSAPI
                 excelData.Dist1[i] = absDist1;
                 excelData.Dist2[i] = absDist2;
 
-                string coordinateSystem = ResolveCoordinateSystem(coordinateOverride, direction);
+                string coordinateSystem = ResolveCoordinateSystem(direction);
                 excelData.CoordinateSystem[i] = coordinateSystem;
 
                 prepared.Add(new PreparedLoadAssignment(
@@ -823,29 +822,9 @@ namespace GhcETABSAPI
             return dirCode;
         }
 
-        private static string ResolveCoordinateSystem(string coordinateSystem, int direction)
+        private static string ResolveCoordinateSystem(int direction)
         {
             string directionReference = Math.Abs(direction) < 10 ? "Local" : "Global";
-
-            if (string.IsNullOrWhiteSpace(coordinateSystem))
-            {
-                return directionReference;
-            }
-
-            string trimmed = coordinateSystem.Trim();
-
-            if (string.Equals(trimmed, "Local", StringComparison.OrdinalIgnoreCase) ||
-                trimmed.StartsWith("Local", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Local";
-            }
-
-            if (string.Equals(trimmed, "Global", StringComparison.OrdinalIgnoreCase) ||
-                trimmed.StartsWith("Global", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Global";
-            }
-
             return directionReference;
         }
 

@@ -137,7 +137,7 @@ namespace GhcETABSAPI
 
                 int loadType = (myType == 2) ? 2 : 1;
                 int direction = ClampDirCode(dirCode);
-                string coordinateSystem = ResolveCoordinateSystem(null, direction);
+                string coordinateSystem = ResolveCoordinateSystem(direction);
                 bool replaceFlag = replaceMode;
 
                 int frameCount = frameNames.Count;
@@ -384,29 +384,9 @@ namespace GhcETABSAPI
             return dirCode;
         }
 
-        private static string ResolveCoordinateSystem(string coordinateSystem, int direction)
+        private static string ResolveCoordinateSystem(int direction)
         {
             string directionReference = Math.Abs(direction) < 10 ? "Local" : "Global";
-
-            if (string.IsNullOrWhiteSpace(coordinateSystem))
-            {
-                return directionReference;
-            }
-
-            string trimmed = coordinateSystem.Trim();
-
-            if (string.Equals(trimmed, "Local", StringComparison.OrdinalIgnoreCase) ||
-                trimmed.StartsWith("Local", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Local";
-            }
-
-            if (string.Equals(trimmed, "Global", StringComparison.OrdinalIgnoreCase) ||
-                trimmed.StartsWith("Global", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Global";
-            }
-
             return directionReference;
         }
 
