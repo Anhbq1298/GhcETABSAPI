@@ -28,6 +28,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using ETABSv1;
 using Grasshopper.Kernel;
+using static GhcETABSAPI.ComponentShared;
 
 namespace GhcETABSAPI
 {
@@ -264,38 +265,6 @@ namespace GhcETABSAPI
             _lastRun = currentRunState;
         }
 
-        private static List<string> NormalizeDistinct(IList<string> source)
-        {
-            List<string> result = new List<string>();
-            if (source == null)
-            {
-                return result;
-            }
-
-            HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            for (int i = 0; i < source.Count; i++)
-            {
-                string entry = source[i];
-                if (string.IsNullOrWhiteSpace(entry))
-                {
-                    continue;
-                }
-
-                string trimmed = entry.Trim();
-                if (trimmed.Length == 0)
-                {
-                    continue;
-                }
-
-                if (seen.Add(trimmed))
-                {
-                    result.Add(trimmed);
-                }
-            }
-
-            return result;
-        }
-
         private static (bool success, List<DistributedLoadEntry> entries) CollectDistributedLoads(cSapModel model, string frameName)
         {
             List<DistributedLoadEntry> entries = new List<DistributedLoadEntry>();
@@ -402,65 +371,6 @@ namespace GhcETABSAPI
             catch
             {
                 return false;
-            }
-        }
-
-        private static void EnsureModelUnlocked(cSapModel model)
-        {
-            if (model == null)
-            {
-                return;
-            }
-
-            try
-            {
-                bool isLocked = model.GetModelIsLocked();
-                if (isLocked)
-                {
-                    model.SetModelIsLocked(false);
-                }
-            }
-            catch
-            {
-                // ignored
-            }
-        }
-
-        private static HashSet<string> TryGetExistingFrameNames(cSapModel model)
-        {
-            if (model == null)
-            {
-                return null;
-            }
-
-            try
-            {
-                int count = 0;
-                string[] names = null;
-                int ret = model.FrameObj.GetNameList(ref count, ref names);
-                if (ret != 0)
-                {
-                    return null;
-                }
-
-                HashSet<string> result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (names != null)
-                {
-                    for (int i = 0; i < names.Length; i++)
-                    {
-                        string nm = names[i];
-                        if (!string.IsNullOrWhiteSpace(nm))
-                        {
-                            result.Add(nm.Trim());
-                        }
-                    }
-                }
-
-                return result;
-            }
-            catch
-            {
-                return null;
             }
         }
 
