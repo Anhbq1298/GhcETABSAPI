@@ -17,6 +17,10 @@ namespace GhcETABSAPI
         // Prevent overlapping COM calls in multi-threaded contexts
         private static readonly object _excelLock = new object();
 
+        // Default template path (relative to the running folder)
+        private static readonly string _defaultTemplateRelativePath =
+            Path.Combine("templateExcel", "ETABS_DB_Template.xlsx");
+
         /// <summary>
         /// Convert a relative path to full path using AppDomain.BaseDirectory.
         /// Returns full path if input is already absolute; null/empty stays null.
@@ -52,9 +56,9 @@ namespace GhcETABSAPI
         }
 
         /// <summary>
-        /// Force-restart Excel: if a running instance exists, close it completely (discard unsaved),
-        /// then start a fresh Excel instance and open the workbook at 'filePathOrRelative'.
-        /// Returns true if a new Excel Application was created (always true on success with this strategy).
+        /// Force-restart Excel: close any running instance, then open workbook.
+        /// If 'filePathOrRelative' is null/empty, uses "templateExcel/ETABS_DB_Template.xlsx".
+        /// Returns true if a new Excel Application was created (always true on success here).
         /// </summary>
         internal static bool AttachOrOpenWorkbook(
             out Excel.Application app,
@@ -68,22 +72,27 @@ namespace GhcETABSAPI
                 app = null;
                 wb = null;
 
-                // Resolve full path and validate existence (avoid Excel popups)
-                string path = ProjectRelative(filePathOrRelative);
+                // Resolve input path (fallback to default template when not provided)
+                string requestedPath = string.IsNullOrWhiteSpace(filePathOrRelative)
+                    ? _defaultTemplateRelativePath
+                    : filePathOrRelative;
+
+                // Resolve full path and validate existence
+                string path = ProjectRelative(requestedPath);
                 if (string.IsNullOrWhiteSpace(path)) return false;
 
                 string fullPath = Path.GetFullPath(path);
                 if (!File.Exists(fullPath)) return false;
 
-                // 0) If an Excel instance is running, close it completely to start clean.
+                // 0) Close any running Excel for clean start
                 var running = TryGetRunningExcelApplication();
                 if (running != null)
                 {
-                    SafeQuitExcel(running); // discards unsaved changes, releases RCWs, GC x2
+                    SafeQuitExcel(running);
                     running = null;
                 }
 
-                // 1) Create a fresh Excel instance and open the workbook (no prompts)
+                // 1) Create fresh Excel & open workbook (no prompts)
                 bool createdApplication = false;
                 try
                 {
@@ -105,7 +114,6 @@ namespace GhcETABSAPI
                     }
                     catch
                     {
-                        // Fallback: try read-only once
                         if (!readOnly)
                         {
                             wb = app.Workbooks.Open(
@@ -126,15 +134,15 @@ namespace GhcETABSAPI
                         try { app.DisplayAlerts = prevAlerts; } catch { }
                     }
 
-                    // 2) UI polish
+                    // 2) UI polish: show & MAXIMIZE
                     try
                     {
                         if (visible) { app.Visible = true; app.UserControl = true; }
                         wb.Activate();
+                        MaximizeExcelWindow(app);   // <<-- maximize Excel window(s)
                     }
                     catch { /* no-op */ }
 
-                    // With the force-restart strategy, a new Excel.exe is always spawned on success
                     return createdApplication; // true
                 }
                 catch
@@ -147,6 +155,43 @@ namespace GhcETABSAPI
                     return false;
                 }
             }
+        }
+
+        /// <summary>
+        /// Maximize Excel UI window(s) reliably (MDI/SDI): Application & ActiveWindow + Win32.
+        /// </summary>
+        private static void MaximizeExcelWindow(Excel.Application app)
+        {
+            if (app == null) return;
+            try
+            {
+                // Excel-side maximize (covers MDI/SDI)
+                try { app.WindowState = Excel.XlWindowState.xlMaximized; } catch { }
+                Excel.Window aw = null;
+                try
+                {
+                    aw = app.ActiveWindow;
+                    if (aw != null)
+                    {
+                        try { aw.WindowState = Excel.XlWindowState.xlMaximized; } catch { }
+                    }
+                }
+                catch { }
+                finally
+                {
+                    if (aw != null) ReleaseCom(aw);
+                }
+
+                // Win32 ensure top-level window is maximized and foreground
+                IntPtr hwnd = (IntPtr)app.Hwnd;
+                if (hwnd != IntPtr.Zero)
+                {
+                    ShowWindow(hwnd, SW_RESTORE);
+                    ShowWindow(hwnd, SW_MAXIMIZE);
+                    SetForegroundWindow(hwnd);
+                }
+            }
+            catch { }
         }
 
         /// <summary>
@@ -165,12 +210,11 @@ namespace GhcETABSAPI
             try
             {
                 books = excel.Workbooks;
-                // Close from last to first; do NOT use foreach (creates hidden enumerator RCWs)
                 for (int i = books.Count; i >= 1; i--)
                 {
                     Excel.Workbook wb = null;
                     try { wb = books[i]; wb.Close(SaveChanges: false); }
-                    catch { /* ignore */ }
+                    catch { }
                     finally { ReleaseCom(wb); }
                 }
             }
@@ -180,7 +224,6 @@ namespace GhcETABSAPI
             try { excel.Quit(); } catch { }
             ReleaseCom(excel);
 
-            // Ensure COM proxies are finalized so EXCEL.EXE actually exits
             try
             {
                 GC.Collect();
@@ -195,7 +238,6 @@ namespace GhcETABSAPI
         /// Try to get a running Excel instance WITHOUT Marshal.GetActiveObject.
         /// 1) VB Interaction.GetObject
         /// 2) HWND/Accessibility (FindWindowEx + AccessibleObjectFromWindow)
-        /// Returns null if not found / not accessible.
         /// </summary>
         private static Excel.Application TryGetRunningExcelApplication()
         {
@@ -211,7 +253,6 @@ namespace GhcETABSAPI
                     result = obj as Excel.Application;
                     if (result != null) return;
 
-                    // If late-bound object, try Application property
                     if (obj != null)
                     {
                         var appObj = obj.GetType().InvokeMember("Application", BindingFlags.GetProperty, null, obj, null);
@@ -221,7 +262,7 @@ namespace GhcETABSAPI
                 }
                 catch (Exception ex)
                 {
-                    captured = ex; // fall through to HWND route
+                    captured = ex;
                     result = null;
                 }
 
@@ -253,7 +294,7 @@ namespace GhcETABSAPI
                                         result = appObj as Excel.Application;
                                         if (result != null) return;
                                     }
-                                    catch { /* ignore */ }
+                                    catch { }
                                     finally
                                     {
                                         try { if (Marshal.IsComObject(sheetObj)) Marshal.FinalReleaseComObject(sheetObj); } catch { }
@@ -270,7 +311,6 @@ namespace GhcETABSAPI
                 }
             }
 
-            // Ensure STA for COM calls
             if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
             {
                 Probe();
@@ -286,15 +326,24 @@ namespace GhcETABSAPI
             if (result == null && captured != null)
                 Debug.WriteLine("Excel not reachable via Interaction/AccessibleObject: " + captured.Message);
 
-            return result; // null if no instance
+            return result;
         }
 
         // ---- Win32 + Accessibility interop helpers ----
         private const uint OBJID_NATIVEOM = 0xFFFFFFF0;
         private static readonly Guid IID_IDispatch = new Guid("00020400-0000-0000-C000-000000000046");
 
+        private const int SW_RESTORE = 9;
+        private const int SW_MAXIMIZE = 3;
+
         [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
         private static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
 
         [DllImport("oleacc.dll")]
         private static extern int AccessibleObjectFromWindow(
@@ -306,9 +355,7 @@ namespace GhcETABSAPI
             com = null;
             try
             {
-                // COPY readonly field ra biến local
-                Guid iid = IID_IDispatch;
-
+                Guid iid = IID_IDispatch; // local copy for ref param
                 int hr = AccessibleObjectFromWindow(hwnd, OBJID_NATIVEOM, ref iid, out object obj);
                 if (hr >= 0 && obj != null)
                 {
@@ -325,11 +372,9 @@ namespace GhcETABSAPI
             app = null;
             if (TryGetComFromHwnd(hwnd, out object obj) && obj != null)
             {
-                // Try cast directly
                 app = obj as Excel.Application;
                 if (app != null) return true;
 
-                // Or get Application property
                 try
                 {
                     var appObj = obj.GetType().InvokeMember("Application", BindingFlags.GetProperty, null, obj, null);
@@ -356,7 +401,6 @@ namespace GhcETABSAPI
             Excel.Worksheet ws = null;
             try
             {
-                // 1-based loop and release intermediates to avoid leaks
                 for (int i = 1; i <= wb.Worksheets.Count; i++)
                 {
                     Excel.Worksheet s = null;
@@ -365,7 +409,7 @@ namespace GhcETABSAPI
                         s = (Excel.Worksheet)wb.Worksheets[i];
                         if (string.Equals(s.Name, sheetName, StringComparison.OrdinalIgnoreCase))
                         {
-                            ws = s; // transfer ownership to caller
+                            ws = s; // transfer ownership
                             s = null;
                             break;
                         }
@@ -376,7 +420,7 @@ namespace GhcETABSAPI
                     }
                 }
             }
-            catch { /* ignore and try create */ }
+            catch { }
 
             if (ws == null)
             {
@@ -385,7 +429,7 @@ namespace GhcETABSAPI
                 {
                     sheets = wb.Worksheets;
                     ws = (Excel.Worksheet)sheets.Add(After: sheets[sheets.Count]);
-                    try { ws.Name = sheetName; } catch { /* could clash, leave default */ }
+                    try { ws.Name = sheetName; } catch { }
                 }
                 finally
                 {
@@ -397,14 +441,44 @@ namespace GhcETABSAPI
         }
 
         /// <summary>
-        /// Using existing workbook/worksheet (no attach/open here). Writes a ragged column dictionary starting at (startRow,startColumn).
+        /// Parse "A1" (or "$A$1") to (row, col). Returns false if invalid.
+        /// </summary>
+        private static bool TryParseA1Address(string a1, out int row, out int col)
+        {
+            row = 0; col = 0;
+            if (string.IsNullOrWhiteSpace(a1)) return false;
+
+            string s = a1.Trim().ToUpperInvariant();
+            int i = 0;
+
+            while (i < s.Length && (s[i] == '$' || char.IsLetter(s[i])))
+            {
+                if (char.IsLetter(s[i]))
+                    col = col * 26 + (s[i] - 'A' + 1);
+                i++;
+            }
+            if (col <= 0) return false;
+
+            if (i < s.Length && s[i] == '$') i++;
+
+            int start = i;
+            while (i < s.Length && char.IsDigit(s[i])) i++;
+            if (start == i) return false;
+            if (!int.TryParse(s.Substring(start, i - start), NumberStyles.None, CultureInfo.InvariantCulture, out row)) return false;
+
+            return row > 0 && col > 0;
+        }
+
+        /// <summary>
+        /// Write data into a worksheet starting at (startRow,startColumn) or 'startAddress' (A1).
+        /// Bold header row; activate sheet; focus starting cell.
         /// </summary>
         internal static string WriteDictionaryToWorksheet(
             IDictionary<string, List<object>> data,
             IList<string> headers,
             IList<string> columnOrder,
-            Excel.Workbook wb,          // reuse existing workbook (no attach/open here)
-            string worksheetName,       // sheet name instead of Excel.Worksheet
+            Excel.Workbook wb,
+            string worksheetName,
             int startRow,
             int startColumn,
             string startAddress,
@@ -417,14 +491,20 @@ namespace GhcETABSAPI
 
             Excel.Worksheet ws = null;
             Excel.Range range = null, topLeft = null, bottomRight = null;
+            Excel.Range headerRight = null, headerRow = null;
 
             try
             {
-                // Get or create the target worksheet
+                if (!string.IsNullOrWhiteSpace(startAddress) &&
+                    TryParseA1Address(startAddress, out int r, out int c))
+                {
+                    startRow = r;
+                    startColumn = c;
+                }
+
                 ws = GetOrCreateWorksheet(wb, worksheetName);
                 if (ws == null) return "Failed to access worksheet.";
 
-                // Build column order (explicit order preferred, otherwise dictionary order + append any missing keys)
                 var columnKeys = new List<string>();
                 if (columnOrder != null && columnOrder.Count > 0)
                     columnKeys.AddRange(columnOrder);
@@ -436,15 +516,13 @@ namespace GhcETABSAPI
 
                 int maxRows = 0;
                 foreach (var k in columnKeys)
-                {
                     if (data.TryGetValue(k, out var lst) && lst != null && lst.Count > maxRows)
                         maxRows = lst.Count;
-                }
 
-                int totalRows = Math.Max(1, maxRows + 1); // +1 for header row
+                int totalRows = Math.Max(1, maxRows + 1); // +1 header
                 var values = new object[totalRows, colCount];
 
-                for (int c = 0; c < colCount; c++)
+                for (c = 0; c < colCount; c++)
                 {
                     string key = columnKeys[c] ?? string.Empty;
                     string headerLabel = (headers != null && c < headers.Count && !string.IsNullOrWhiteSpace(headers[c]))
@@ -454,11 +532,10 @@ namespace GhcETABSAPI
                     values[0, c] = headerLabel ?? string.Empty;
 
                     if (!data.TryGetValue(key, out var branch) || branch == null) continue;
-                    for (int r = 0; r < branch.Count; r++)
-                        values[r + 1, c] = branch[r];
+                    for (int r2 = 0; r2 < branch.Count; r2++)
+                        values[r2 + 1, c] = branch[r2];
                 }
 
-                // Write block
                 startRow = Math.Max(1, startRow);
                 startColumn = Math.Max(1, startColumn);
 
@@ -467,18 +544,41 @@ namespace GhcETABSAPI
                 range = ws.Range[topLeft, bottomRight];
                 range.Value2 = values;
 
+                // Bold header
+                try
+                {
+                    headerRight = (Excel.Range)ws.Cells[startRow, startColumn + colCount - 1];
+                    headerRow = ws.Range[topLeft, headerRight];
+                    headerRow.Font.Bold = true;
+                }
+                finally
+                {
+                    ReleaseCom(headerRow);
+                    ReleaseCom(headerRight);
+                }
+
+                // Activate & maximize, focus starting cell
+                try
+                {
+                    ws.Activate();
+                    MaximizeExcelWindow(ws.Application);
+                    try { ws.Application.Goto(topLeft, true); } catch { }
+                    try { topLeft.Select(); } catch { }
+                }
+                catch { }
+
                 if (saveAfterWrite && !readOnly)
                 {
-                    try { wb.Save(); } catch { /* ignore */ }
+                    try { wb.Save(); } catch { }
                 }
 
                 string wsName = ws?.Name ?? worksheetName;
-                string startLabel = string.IsNullOrWhiteSpace(startAddress)
-                    ? ColumnNumberToLetters(startColumn) + Math.Max(1, startRow).ToString(CultureInfo.InvariantCulture)
-                    : startAddress.ToUpperInvariant();
+                string startLabel = !string.IsNullOrWhiteSpace(startAddress)
+                    ? startAddress.ToUpperInvariant()
+                    : ColumnNumberToLetters(startColumn) + Math.Max(1, startRow).ToString(CultureInfo.InvariantCulture);
 
                 return string.Format(CultureInfo.InvariantCulture,
-                    "Wrote {0} columns × {1} rows to '{2}' starting at {3}.",
+                    "Wrote {0} columns × {1} rows to '{2}' starting at {3}; header bolded and focused there.",
                     colCount, totalRows, wsName, startLabel);
             }
             catch (Exception ex)
@@ -490,7 +590,7 @@ namespace GhcETABSAPI
                 ReleaseCom(range);
                 ReleaseCom(topLeft);
                 ReleaseCom(bottomRight);
-                ReleaseCom(ws); // WS RCW created here; caller still owns the workbook
+                ReleaseCom(ws);
             }
         }
 
@@ -506,7 +606,6 @@ namespace GhcETABSAPI
                 builder.Insert(0, (char)('A' + modulo));
                 dividend = (dividend - modulo) / 26;
             }
-
             return builder.Length > 0 ? builder.ToString() : "A";
         }
     }
