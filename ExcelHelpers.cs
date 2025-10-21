@@ -17,10 +17,6 @@ namespace GhcETABSAPI
         // Prevent overlapping COM calls in multi-threaded contexts
         private static readonly object _excelLock = new object();
 
-        // Default template path (relative to the running folder)
-        private static readonly string _defaultTemplateRelativePath =
-            Path.Combine("templateExcel", "ETABS_DB_Template.xlsx");
-
         /// <summary>
         /// Convert a relative path to full path using AppDomain.BaseDirectory.
         /// Returns full path if input is already absolute; null/empty stays null.
@@ -72,21 +68,12 @@ namespace GhcETABSAPI
                 app = null;
                 wb = null;
 
-                bool createTemporaryWorkbook = filePathOrRelative == null;
+                bool createTemporaryWorkbook = string.IsNullOrWhiteSpace(filePathOrRelative);
 
                 string fullPath = null;
                 if (!createTemporaryWorkbook)
                 {
-                    // Resolve input path (fallback to default template when not provided)
-                    string requestedPath = string.IsNullOrWhiteSpace(filePathOrRelative)
-                        ? _defaultTemplateRelativePath
-                        : filePathOrRelative;
-
-                    // Resolve full path and validate existence
-                    string path = ProjectRelative(requestedPath);
-                    if (string.IsNullOrWhiteSpace(path)) return false;
-
-                    fullPath = Path.GetFullPath(path);
+                    fullPath = filePathOrRelative;
                     if (!File.Exists(fullPath)) return false;
                 }
 
