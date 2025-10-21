@@ -44,6 +44,7 @@ namespace GhcETABSAPI
     {
         private bool lastAdd = false;
         private string lastMsg = "Idle.";
+        private string initPath = null; // default to plugin dir
 
         private const string DefaultHeaderBase = "Header";
 
@@ -64,20 +65,26 @@ namespace GhcETABSAPI
         {
             p.AddBooleanParameter("add", "add", "Press to run once (rising edge).", GH_ParamAccess.item, false);
             p.AddGenericParameter("tree", "tree", "Data tree to export. Each branch becomes an Excel column.", GH_ParamAccess.tree);
-            p.AddTextParameter("path", "path", "Workbook path (.xlsx). Relative paths resolve against the plug-in directory.", GH_ParamAccess.item, "TreeExport.xlsx");
+
+            // path: null/empty => dùng template; nếu cung cấp thì PHẢI là absolute .xlsx
+            int pathIndex = p.AddTextParameter(
+                "path", "path",
+                "Workbook path (.xlsx). Leave blank/null to auto-use the template; if provided it MUST be an absolute path (e.g., C:\\...\\file.xlsx). Relative paths are not allowed.",
+                GH_ParamAccess.item, string.Empty);
+            p[pathIndex].Optional = true;
+
             p.AddTextParameter("ws", "ws", "Worksheet name. Created if missing.", GH_ParamAccess.item, "Sheet1");
             p.AddTextParameter("address", "address", "Starting Excel cell address (e.g., A1).", GH_ParamAccess.item, "A1");
+
             int optionsIndex = p.AddBooleanParameter(
-                "excelOptions",
-                "excelOpt",
-                "Optional Excel toggles as a boolean list: [0]=visible (default true), [1]=saveAfterWrite (default true), [2]=readOnly (default false).",
+                "excelOptions", "excelOpt",
+                "Optional toggles: [0]=visible (default true), [1]=saveAfterWrite (default true), [2]=readOnly (default false).",
                 GH_ParamAccess.list);
             p[optionsIndex].Optional = true;
 
             int headerIndex = p.AddTextParameter(
-                "headers",
-                "headers",
-                "Optional list of header labels. Blanks are auto-filled as 'Header', 'Header_1', ...; if omitted entirely, uses branch path strings.",
+                "headers", "headers",
+                "Optional header labels. If empty, branch paths are used.",
                 GH_ParamAccess.list);
             p[headerIndex].Optional = true;
         }
@@ -109,6 +116,7 @@ namespace GhcETABSAPI
             bool readOnly = false;
             var excelOptions = new List<bool>();
             var headerOverrides = new List<string>();
+            string message;
 
             da.GetDataTree(1, out tree);
             da.GetData(2, ref workbookPath);
@@ -127,7 +135,7 @@ namespace GhcETABSAPI
                     readOnly = excelOptions[2];
             }
 
-            string message;
+            
 
             if (!TryParseAddress(address, out int startRow, out int startColumn))
             {
