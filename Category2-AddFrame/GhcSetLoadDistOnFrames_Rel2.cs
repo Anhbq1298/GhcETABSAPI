@@ -143,82 +143,70 @@ namespace GhcETABSAPI
                     List<string> failedPairs = new List<string>();
                     List<string> skippedPairs = new List<string>();
 
-                    for (int i = 0; i < excelData.RowCount; i++)
+                    List<PreparedLoadAssignment> preparedLoads = PrepareLoadAssignments(
+                        excelData,
+                        existingNames,
+                        skippedPairs,
+                        failedPairs,
+                        ref failedCount);
+
+                    int totalPrepared = preparedLoads.Count;
+                    if (totalPrepared > 0)
                     {
-                        string frameName = TrimOrEmpty(excelData.FrameName[i]);
-                        string loadPattern = TrimOrEmpty(excelData.LoadPattern[i]);
-                        int? rawType = excelData.MyType[i];
-                        int? rawDirection = excelData.Direction[i];
-                        double? rawRelDist1 = excelData.RelDist1[i];
-                        double? rawRelDist2 = excelData.RelDist2[i];
-                        double? rawVal1 = excelData.Value1[i];
-                        double? rawVal2 = excelData.Value2[i];
-                        string coordinateOverride = TrimOrEmpty(excelData.CoordinateSystem[i]);
+                        string initialStatus = BuildProgressStatus(0, totalPrepared);
+                        UiHelpers.ShowProgressBar("Assign Frame Distributed Loads", initialStatus, totalPrepared);
+                    }
 
-                        if (string.IsNullOrEmpty(frameName) || string.IsNullOrEmpty(loadPattern) ||
-                            !rawType.HasValue || !rawDirection.HasValue ||
-                            !rawRelDist1.HasValue || !rawRelDist2.HasValue ||
-                            !rawVal1.HasValue || !rawVal2.HasValue)
+                    try
+                    {
+                        for (int j = 0; j < preparedLoads.Count; j++)
                         {
-                            skippedPairs.Add($"{i}:{frameName}");
-                            continue;
+                            PreparedLoadAssignment prepared = preparedLoads[j];
+
+                            int ret = sapModel.FrameObj.SetLoadDistributed(
+                                prepared.FrameName,
+                                prepared.LoadPattern,
+                                prepared.LoadType,
+                                prepared.Direction,
+                                prepared.RelDist1,
+                                prepared.RelDist2,
+                                prepared.Value1,
+                                prepared.Value2,
+                                prepared.CoordinateSystem,
+                                true,
+                                replaceMode,
+                                (int)eItemType.Objects);
+
+                            if (ret == 0)
+                            {
+                                assignedCount++;
+                                UiHelpers.UpdateProgressBar(
+                                    assignedCount,
+                                    totalPrepared,
+                                    BuildProgressStatus(assignedCount, totalPrepared));
+                            }
+                            else
+                            {
+                                failedCount++;
+                                failedPairs.Add($"{prepared.RowIndex}:{prepared.FrameName}");
+                                UiHelpers.UpdateProgressBar(
+                                    assignedCount,
+                                    totalPrepared,
+                                    BuildProgressStatus(assignedCount, totalPrepared));
+                            }
                         }
 
-                        if (existingNames != null && !existingNames.Contains(frameName))
+                        if (totalPrepared > 0)
                         {
-                            failedCount++;
-                            failedPairs.Add($"{i}:{frameName}");
-                            continue;
+                            UiHelpers.UpdateProgressBar(
+                                assignedCount,
+                                totalPrepared,
+                                BuildProgressStatus(assignedCount, totalPrepared));
                         }
-
-                        int loadType = NormalizeLoadType(rawType.Value);
-                        int direction = ClampDirCode(rawDirection.Value);
-                        double relDist1 = Clamp01(rawRelDist1.Value);
-                        double relDist2 = Clamp01(rawRelDist2.Value);
-                        double val1 = rawVal1.Value;
-                        double val2 = rawVal2.Value;
-
-                        if (IsInvalidNumber(relDist1) || IsInvalidNumber(relDist2) ||
-                            IsInvalidNumber(val1) || IsInvalidNumber(val2))
-                        {
-                            skippedPairs.Add($"{i}:{frameName}");
-                            continue;
-                        }
-
-                        if (relDist1 > relDist2)
-                        {
-                            double tmp = relDist1;
-                            relDist1 = relDist2;
-                            relDist2 = tmp;
-                        }
-
-                        string coordinateSystem = !string.IsNullOrEmpty(coordinateOverride)
-                            ? coordinateOverride
-                            : ((direction >= 1 && direction <= 3) ? "Local" : "Global");
-
-                        int ret = sapModel.FrameObj.SetLoadDistributed(
-                            frameName,
-                            loadPattern,
-                            loadType,
-                            direction,
-                            relDist1,
-                            relDist2,
-                            val1,
-                            val2,
-                            coordinateSystem,
-                            true,
-                            replaceMode,
-                            (int)eItemType.Objects);
-
-                        if (ret == 0)
-                        {
-                            assignedCount++;
-                        }
-                        else
-                        {
-                            failedCount++;
-                            failedPairs.Add($"{i}:{frameName}");
-                        }
+                    }
+                    finally
+                    {
+                        UiHelpers.CloseProgressBar();
                     }
 
                     messages.Add($"{Plural(assignedCount, "member")} successfully assigned, {Plural(failedCount, "member")} unsuccessful.");
@@ -255,6 +243,137 @@ namespace GhcETABSAPI
             _lastMessages.Clear();
             _lastMessages.AddRange(messages);
             _lastRun = run;
+        }
+
+        private static List<PreparedLoadAssignment> PrepareLoadAssignments(
+            ExcelLoadData excelData,
+            HashSet<string> existingNames,
+            List<string> skippedPairs,
+            List<string> failedPairs,
+            ref int failedCount)
+        {
+            List<PreparedLoadAssignment> prepared = new List<PreparedLoadAssignment>();
+            if (excelData == null)
+            {
+                return prepared;
+            }
+
+            for (int i = 0; i < excelData.RowCount; i++)
+            {
+                string frameName = TrimOrEmpty(excelData.FrameName[i]);
+                string loadPattern = TrimOrEmpty(excelData.LoadPattern[i]);
+                int? rawType = excelData.MyType[i];
+                int? rawDirection = excelData.Direction[i];
+                double? rawRelDist1 = excelData.RelDist1[i];
+                double? rawRelDist2 = excelData.RelDist2[i];
+                double? rawVal1 = excelData.Value1[i];
+                double? rawVal2 = excelData.Value2[i];
+                string coordinateOverride = TrimOrEmpty(excelData.CoordinateSystem[i]);
+
+                if (string.IsNullOrEmpty(frameName) || string.IsNullOrEmpty(loadPattern) ||
+                    !rawType.HasValue || !rawDirection.HasValue ||
+                    !rawRelDist1.HasValue || !rawRelDist2.HasValue ||
+                    !rawVal1.HasValue || !rawVal2.HasValue)
+                {
+                    skippedPairs.Add($"{i}:{frameName}");
+                    continue;
+                }
+
+                if (existingNames != null && !existingNames.Contains(frameName))
+                {
+                    failedCount++;
+                    failedPairs.Add($"{i}:{frameName}");
+                    continue;
+                }
+
+                int loadType = NormalizeLoadType(rawType.Value);
+                int direction = ClampDirCode(rawDirection.Value);
+                double relDist1 = Clamp01(rawRelDist1.Value);
+                double relDist2 = Clamp01(rawRelDist2.Value);
+                double val1 = rawVal1.Value;
+                double val2 = rawVal2.Value;
+
+                if (IsInvalidNumber(relDist1) || IsInvalidNumber(relDist2) ||
+                    IsInvalidNumber(val1) || IsInvalidNumber(val2))
+                {
+                    skippedPairs.Add($"{i}:{frameName}");
+                    continue;
+                }
+
+                if (relDist1 > relDist2)
+                {
+                    double tmp = relDist1;
+                    relDist1 = relDist2;
+                    relDist2 = tmp;
+                }
+
+                string coordinateSystem = !string.IsNullOrEmpty(coordinateOverride)
+                    ? coordinateOverride
+                    : ((direction >= 1 && direction <= 3) ? "Local" : "Global");
+
+                prepared.Add(new PreparedLoadAssignment(
+                    i,
+                    frameName,
+                    loadPattern,
+                    loadType,
+                    direction,
+                    relDist1,
+                    relDist2,
+                    val1,
+                    val2,
+                    coordinateSystem));
+            }
+
+            return prepared;
+        }
+
+        private static string BuildProgressStatus(int assignedCount, int totalPrepared)
+        {
+            if (totalPrepared <= 0)
+            {
+                return "";
+            }
+
+            double percent = totalPrepared == 0 ? 0.0 : (assignedCount / (double)totalPrepared) * 100.0;
+            return $"Assigned {assignedCount} of {totalPrepared} members ({percent:0.##}%).";
+        }
+
+        private readonly struct PreparedLoadAssignment
+        {
+            internal PreparedLoadAssignment(
+                int rowIndex,
+                string frameName,
+                string loadPattern,
+                int loadType,
+                int direction,
+                double relDist1,
+                double relDist2,
+                double value1,
+                double value2,
+                string coordinateSystem)
+            {
+                RowIndex = rowIndex;
+                FrameName = frameName;
+                LoadPattern = loadPattern;
+                LoadType = loadType;
+                Direction = direction;
+                RelDist1 = relDist1;
+                RelDist2 = relDist2;
+                Value1 = value1;
+                Value2 = value2;
+                CoordinateSystem = coordinateSystem;
+            }
+
+            internal int RowIndex { get; }
+            internal string FrameName { get; }
+            internal string LoadPattern { get; }
+            internal int LoadType { get; }
+            internal int Direction { get; }
+            internal double RelDist1 { get; }
+            internal double RelDist2 { get; }
+            internal double Value1 { get; }
+            internal double Value2 { get; }
+            internal string CoordinateSystem { get; }
         }
 
         private static ExcelLoadData ReadExcelSheet(string fullPath, string sheetName)
