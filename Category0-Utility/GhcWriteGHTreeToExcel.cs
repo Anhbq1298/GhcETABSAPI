@@ -1,31 +1,32 @@
 ﻿// -------------------------------------------------------------
 // Component : Write GH Tree To Excel
 // Author    : Anh Bui (extended by ChatGPT)
+// Encoding  : UTF-8
 // Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
 // Depends   : RhinoCommon, Grasshopper, Microsoft.Office.Interop.Excel
-// Panel     : Category = "ETABS", Subcategory = "0.0 Utility"
+// Panel     : Category = "ETABS API", Subcategory = "0.0 Utility"
 // Build     : x64; Excel interop reference -> Embed Interop Types = False
 //
 // INPUTS (ordered exactly as shown on the component):
-//   0) add            (bool, item) Rising-edge trigger. Runs when it goes False→True.
+//   0) add            (bool, item)  Rising-edge trigger. Runs when it goes False→True.
 //   1) tree           (generic, tree) Data tree to export. Each GH_Path becomes an Excel column.
-//   2) path           (string, item) Workbook path (relative → project directory). Default "TreeExport.xlsx".
+//   2) path           (string, item) Workbook path (relative → plugin directory). Default "TreeExport.xlsx".
 //   3) ws             (string, item) Worksheet name. Created if missing. Default "Sheet1".
 //   4) address        (string, item) Starting Excel address (e.g., "A1"). Defaults to "A1".
-//   5) visible        (bool, item) Show Excel application window. Default true.
-//   6) saveAfterWrite (bool, item) Save workbook after writing (ignored when readOnly). Default true.
-//   7) readOnly       (bool, item) Open workbook read-only. Default false.
-//   8) headers        (string, list) Optional column headers applied in list order when provided.
+//   5) visible        (bool, item)  Show Excel application window. Default true.
+//   6) saveAfterWrite (bool, item)  Save workbook after writing (ignored when readOnly). Default true.
+//   7) readOnly       (bool, item)  Open workbook read-only. Default false.
+//   8) headers        (string, list) Optional column headers; blanks auto-fill ("Header", "Header_1", ...).
 //
 // OUTPUTS:
 //   0) msg            (string, item) Status message (replayed while idle).
 //
 // BEHAVIOR NOTES:
 //   • Rising-edge gate identical to other ETABS utility components (per-instance memory).
-//   • Uses ExcelHelpers to attach to running Excel or create a new hidden instance.
-//   • Each column header is the branch GH_Path.ToString(); rows contain branch values (as best-effort strings/numbers).
+//   • Uses ExcelHelpers to attach to running Excel or create a new instance.
+//   • Each column header = supplied header (blank → auto) OR branch path string when headers input omitted.
 //   • Saves workbook only when saveAfterWrite = true AND readOnly = false.
-//   • Releases COM references explicitly to avoid Excel.exe persistence.
+//   • COM cleanup handled inside ExcelHelpers.
 // -------------------------------------------------------------
 
 using System;
@@ -36,7 +37,6 @@ using System.Text.RegularExpressions;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
-using System.Runtime.InteropServices;
 using Excel = Microsoft.Office.Interop.Excel;
 
 namespace GhcETABSAPI
@@ -45,6 +45,8 @@ namespace GhcETABSAPI
     {
         private bool lastAdd = false;
         private string lastMsg = "Idle.";
+
+        private const string DefaultHeaderBase = "Header";
 
         public GhcWriteGHTreeToExcel()
           : base(
@@ -55,15 +57,9 @@ namespace GhcETABSAPI
                 "0.0 Utility")
         { }
 
-        public override Guid ComponentGuid
-        {
-            get { return new Guid("8f222ec4-2d36-4b3c-9a36-3a642c224f2f"); }
-        }
+        public override Guid ComponentGuid => new Guid("8f222ec4-2d36-4b3c-9a36-3a642c224f2f");
 
-        protected override Bitmap Icon
-        {
-            get { return null; }
-        }
+        protected override Bitmap Icon => null;
 
         protected override void RegisterInputParams(GH_InputParamManager p)
         {
@@ -78,7 +74,7 @@ namespace GhcETABSAPI
             int headerIndex = p.AddTextParameter(
                 "headers",
                 "headers",
-                "Optional list of header labels. When supplied, entries are applied to columns in list order.",
+                "Optional list of header labels. Blanks are auto-filled as 'Header', 'Header_1', ...; if omitted entirely, uses branch path strings.",
                 GH_ParamAccess.list);
             p[headerIndex].Optional = true;
         }
@@ -108,7 +104,7 @@ namespace GhcETABSAPI
             bool visible = true;
             bool saveAfterWrite = true;
             bool readOnly = false;
-            List<string> headerOverrides = new List<string>();
+            var headerOverrides = new List<string>();
 
             da.GetDataTree(1, out tree);
             da.GetData(2, ref workbookPath);
@@ -119,28 +115,23 @@ namespace GhcETABSAPI
             da.GetData(7, ref readOnly);
             da.GetDataList(8, headerOverrides);
 
-            Excel.Application app;
-            Excel.Workbook wb;
             string message;
 
             if (tree == null || tree.PathCount == 0)
             {
-                message = "Tree is empty.";
-                Finish(da, add, message);
+                Finish(da, add, "Tree is empty.");
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(workbookPath))
             {
-                message = "Workbook path is empty.";
-                Finish(da, add, message);
+                Finish(da, add, "Workbook path is empty.");
                 return;
             }
 
             if (!TryParseAddress(address, out int startRow, out int startColumn))
             {
-                message = "Address is invalid. Use format like A1.";
-                Finish(da, add, message);
+                Finish(da, add, "Address is invalid. Use format like A1.");
                 return;
             }
 
@@ -149,25 +140,28 @@ namespace GhcETABSAPI
                 headerOverrides,
                 out List<string> columnKeys,
                 out List<string> headers);
+
             if (dictionary.Count == 0)
             {
-                message = "Tree is empty.";
-                Finish(da, add, message);
+                Finish(da, add, "Tree is empty.");
                 return;
             }
 
-            bool createdApplication = ExcelHelpers.AttachOrOpenWorkbook(out app, out wb, workbookPath, visible: true);
+            // Attach/open workbook
+            Excel.Application app;
+            Excel.Workbook wb;
+            ExcelHelpers.AttachOrOpenWorkbook(out app, out wb, workbookPath, visible: visible);
 
-
+            // Write
             message = ExcelHelpers.WriteDictionaryToWorksheet(
                 dictionary,
                 headers,
                 columnKeys,
-                wb,                // reuse existing workbook
-                worksheetName,                // reuse existing worksheet
+                wb,                 // reuse existing workbook
+                worksheetName,      // create if missing
                 startRow,
                 startColumn,
-                address,           // only for message text
+                address,            // for message text only
                 saveAfterWrite,
                 readOnly);
 
@@ -182,43 +176,37 @@ namespace GhcETABSAPI
         {
             headers = new List<string>();
             columnKeys = new List<string>();
-            Dictionary<string, List<object>> dict = new Dictionary<string, List<object>>();
+            var dict = new Dictionary<string, List<object>>();
             if (tree == null) return dict;
 
+            // Track used labels to guarantee uniqueness
+            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             int index = 0;
+            bool headersProvided = headerOverrides != null && headerOverrides.Count > 0;
+
             foreach (GH_Path path in tree.Paths)
             {
                 var branch = tree.get_Branch(path);
-                List<object> list = new List<object>();
-
+                var list = new List<object>();
                 if (branch != null)
                 {
                     foreach (IGH_Goo goo in branch)
-                    {
                         list.Add(GooToExcelValue(goo));
-                    }
                 }
 
                 string key = path.ToString();
                 dict[key] = list;
                 columnKeys.Add(key);
 
-                string headerLabel = null;
-                if (headerOverrides != null && index < headerOverrides.Count)
-                {
-                    headerLabel = headerOverrides[index];
-                }
+                // If user provided a headers list, blanks fall back to "Header", "Header_1", ...
+                // If no headers list at all, use the branch path string (original behavior).
+                string desired = (headersProvided && index < headerOverrides.Count) ? headerOverrides[index] : null;
+                string fallback = headersProvided ? DefaultHeaderBase : key;
 
-                if (string.IsNullOrWhiteSpace(headerLabel))
-                {
-                    headerLabel = key;
-                }
-                else
-                {
-                    headerLabel = headerLabel.Trim();
-                }
-
+                string headerLabel = ResolveHeader(desired, fallback, used);
                 headers.Add(headerLabel);
+
                 index++;
             }
 
@@ -229,16 +217,12 @@ namespace GhcETABSAPI
         {
             string baseHeader = string.IsNullOrWhiteSpace(desired) ? fallback : desired.Trim();
             if (string.IsNullOrEmpty(baseHeader))
-            {
-                baseHeader = "Column";
-            }
+                baseHeader = DefaultHeaderBase;
 
             string candidate = baseHeader;
             int suffix = 1;
             while (used.Contains(candidate))
-            {
                 candidate = string.Format(CultureInfo.InvariantCulture, "{0}_{1}", baseHeader, suffix++);
-            }
 
             used.Add(candidate);
             return candidate;
@@ -287,9 +271,7 @@ namespace GhcETABSAPI
 
             column = ColumnLettersToNumber(match.Groups[1].Value);
             if (!int.TryParse(match.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out row))
-            {
                 row = 1;
-            }
 
             return column > 0 && row > 0;
         }
