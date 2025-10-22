@@ -22,12 +22,12 @@
 //       [4] Point1X, [5] Point1Y, [6] Point1Z, [7] Point2X, [8] Point2Y, [9] Point2Z.
 // -------------------------------------------------------------
 
-using System;
-using System.Collections.Generic;
+using ETABSv1;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
-using ETABSv1;
+using System;
+using System.Collections.Generic;
 
 namespace MGT
 {
