@@ -20,7 +20,7 @@ namespace MGT
           : base("Get ETABS Units", 
                 "ETABSUnits",
                  "Get current ETABS working units (force/length/temperature)",
-                 "ETABS API", // Category (tab)
+                 "MGT", // Category (tab)
                  "01. IO" // Subcategory (panel)
                 )
         { }

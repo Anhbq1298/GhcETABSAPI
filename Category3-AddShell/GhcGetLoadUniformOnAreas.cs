@@ -3,7 +3,7 @@
 // Author    : Anh Bui
 // Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
 // Depends   : Grasshopper, ETABSv1 (COM)  [Embed Interop Types = False]
-// Panel     : "ETABS API" / "3.0 Shell (Area) Object Modelling"
+// Panel     : "MGT" / "3.0 Shell (Area) Object Modelling"
 // GUID      : 77f15ab0-1587-4e9b-8a47-335c50a62ddb
 // -------------------------------------------------------------
 // Inputs (ordered):
@@ -58,7 +58,7 @@ namespace MGT
                 "Get Area Uniform Loads",
                 "GetAreaLoads",
                 "Query uniform surface loads assigned to ETABS area objects (per object mode).",
-                "ETABS API",
+                "MGT",
                 "3.0 Area Object Modelling"  )
         {
         }

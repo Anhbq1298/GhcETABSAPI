@@ -2,7 +2,7 @@
 // Component : Unit Scale Factor
 // Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
 // Depends   : Grasshopper
-// Panel     : "ETABS API" / "01. IO"
+// Panel     : "MGT" / "01. IO"
 // Author    : Anh Bui
 // -------------------------------------------------------------
 //
@@ -31,7 +31,7 @@ namespace MGT
         public GhcUnitScaleFactor()
           : base("Unit Scale Factor", "UnitScale",
                  "Compute scale factor to convert from one length unit to another.",
-                 "ETABS API", "01. IO")
+                 "MGT", "01. IO")
         { }
 
         public override Guid ComponentGuid => new Guid("a3cfb5a4-0b45-4b28-bf5a-874c9467b01c");

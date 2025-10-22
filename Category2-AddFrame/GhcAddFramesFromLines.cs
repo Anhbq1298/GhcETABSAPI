@@ -51,7 +51,7 @@ namespace MGT
                 "Add Frames to ETABS",              // Display name
                 "AddFramesToETABS",                 // Nickname
                 "Create ETABS frame objects from Rhino.Geometry.Line with per-line property and optional user name.",
-                "ETABS API",                        // Category (tab)
+                "MGT",                        // Category (tab)
                 "2.0 Frame Object Modelling"        // Subcategory (panel)
             )
         { }

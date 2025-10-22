@@ -3,7 +3,7 @@
 // Author    : Anh Bui
 // Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
 // Depends   : Grasshopper, ETABSv1 (COM)  [Embed Interop Types = False]
-// Panel     : "ETABS API" / "2.0 Frame Object Modelling"
+// Panel     : "MGT" / "2.0 Frame Object Modelling"
 // -------------------------------------------------------------
 // Inputs (ordered):
 //   0) run         (bool, item)    Rising-edge trigger.
@@ -50,7 +50,7 @@ namespace MGT
                 "Set Frame Distributed Loads (Rel)",
                 "SetFrameUDLRel",
                 "Assign distributed loads to ETABS frame objects using relative distances (0..1).",
-                "ETABS API",
+                "MGT",
                 "2.0 Frame Object Modelling")
         {
         }

@@ -46,7 +46,7 @@ namespace MGT
         public GhcAddShellsFromPolylines()
           : base("ETABS Add Shells", "AddShells",
                  "Create ETABS shell areas from closed Rhino polylines.",
-                 "ETABS API",                            // Category (tab)
+                 "MGT",                            // Category (tab)
                  "3.0 Area Object Modelling"            // Subcategory (panel)
                  )
         { }

@@ -30,7 +30,7 @@ namespace MGT
           : base("Get Rhino Units", // Display name
                 "RhUnits", // Nickname
                  "Return the current Rhino model unit system (name and abbreviation).",
-                 "ETABS API", // Category (tab)
+                 "MGT", // Category (tab)
                  "01. IO" // Subcategory (panel)
                 )
         { }

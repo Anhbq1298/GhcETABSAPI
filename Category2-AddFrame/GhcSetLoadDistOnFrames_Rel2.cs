@@ -3,7 +3,7 @@
 // Author    : Anh Bui (extended)
 // Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
 // Depends   : Grasshopper, ETABSv1 (COM), Microsoft.Office.Interop.Excel
-// Panel     : "ETABS API" / "2.0 Frame Object Modelling"
+// Panel     : "MGT" / "2.0 Frame Object Modelling"
 // -------------------------------------------------------------
 // Inputs (ordered):
 //   0) run         (bool, item)    Rising-edge trigger.
@@ -52,7 +52,7 @@ namespace MGT
                 "Set Frame Distributed Loads (Rel, Excel)",
                 "SetFrameUDLRelXl",
                 "Assign distributed loads to ETABS frame objects by reading an Excel worksheet.",
-                "ETABS API",
+                "MGT",
                 "2.0 Frame Object Modelling")
         {
         }

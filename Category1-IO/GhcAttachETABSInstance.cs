@@ -33,7 +33,7 @@ namespace MGT
         public GhcAttachETABSInstance()
           : base("ETABS Attach", "ETABSAttach",
                  "Attach to a running ETABS instance and return cOAPI & cSapModel.",
-                 "ETABS API", // Category (tab)
+                 "MGT", // Category (tab)
                  "01. IO" // Subcategory (panel)
                 )
         { }

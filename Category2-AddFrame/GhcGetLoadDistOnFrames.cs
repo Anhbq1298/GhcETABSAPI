@@ -3,7 +3,7 @@
 // Author    : Anh Bui
 // Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
 // Depends   : Grasshopper, ETABSv1 (COM)  [Embed Interop Types = False]
-// Panel     : "ETABS API" / "2.0 Frame Object Modelling"
+// Panel     : "MGT" / "2.0 Frame Object Modelling"
 // GUID      : a1cfe4a7-9d49-42eb-aac9-774cdd7d1e84
 // -------------------------------------------------------------
 // Inputs (ordered):
@@ -64,7 +64,7 @@ namespace MGT
                 "Get Frame Distributed Loads",
                 "GetFrameDistLoads",
                 "Query distributed loads assigned to ETABS frame objects (per object mode).",
-                "ETABS API",
+                "MGT",
                 "2.0 Frame Object Modelling")
         {
         }

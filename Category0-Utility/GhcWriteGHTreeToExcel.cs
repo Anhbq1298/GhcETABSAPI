@@ -4,7 +4,7 @@
 // Encoding  : UTF-8
 // Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
 // Depends   : RhinoCommon, Grasshopper, Microsoft.Office.Interop.Excel
-// Panel     : Category = "ETABS API", Subcategory = "0.0 Utility"
+// Panel     : Category = "MGT", Subcategory = "0.0 Utility"
 // Build     : x64; Excel interop reference -> Embed Interop Types = False
 //
 // INPUTS (ordered exactly as shown on the component):
@@ -52,7 +52,7 @@ namespace MGT
                 "Write Tree To Excel",
                 "WriteTreeExcel",
                 "Write a Grasshopper data tree to an Excel worksheet. Each path becomes a column and the branch values populate rows.",
-                "ETABS API",
+                "MGT",
                 "0.0 Utility")
         { }
 
