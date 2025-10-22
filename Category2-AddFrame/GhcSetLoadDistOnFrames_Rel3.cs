@@ -79,7 +79,7 @@ namespace MGT
         {
         }
 
-        public override Guid ComponentGuid => new Guid("4A2E7146-0E8B-4E78-86CF-2EFC40306391");
+        public override Guid ComponentGuid => new Guid("4A2E7146-0E8B-4E78-86CF-2EFC40306392");
 
         protected override Bitmap Icon
         {
