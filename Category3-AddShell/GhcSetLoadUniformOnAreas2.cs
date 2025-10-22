@@ -279,7 +279,7 @@ namespace MGT
                 }
 
                 int direction = ClampDirCode(rawDirection.Value);
-                string resolvedCoordinate = ResolveDirectionReference(direction);
+                string resolvedCoordinate = ResolveDirectionReferenceArea(direction);
 
 
                 excelData.AreaName[i] = areaName;

@@ -357,9 +357,7 @@ namespace MGT
                 }
 
                 int direction = ClampDirCode(rawDirection.Value);
-                string resolvedCoordinate = string.IsNullOrEmpty(coordinateSystem)
-                    ? ResolveDirectionReference(direction)
-                    : coordinateSystem;
+                string resolvedCoordinate = ResolveDirectionReferenceArea(direction);
 
                 excelData.AreaName[i] = areaName;
                 excelData.LoadPattern[i] = loadPattern;
