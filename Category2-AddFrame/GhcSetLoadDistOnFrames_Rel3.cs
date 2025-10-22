@@ -86,6 +86,79 @@ namespace MGT
             get
             {
                 try
+                {
+                    Bitmap raw = Properties.Resources.SetLoadDistOnFramesIcon;
+                    return new Bitmap(raw, new Size(24, 24));
+                }
+                catch { return null; }
+            }
+        }
+
+        protected override void RegisterInputParams(GH_InputParamManager p)
+        {
+            p.AddBooleanParameter("run", "run", "Rising-edge trigger; executes when this turns True.", GH_ParamAccess.item, false);
+            p.AddGenericParameter("sapModel", "sapModel", "ETABS cSapModel from the Attach component.", GH_ParamAccess.item);
+            p.AddTextParameter("excelPath", "excelPath", "Full or project-relative path to the workbook.", GH_ParamAccess.item, string.Empty);
+            p.AddTextParameter("sheetName", "sheetName", "Worksheet name containing the data.", GH_ParamAccess.item, "Assigned Loads On Frames");
+            p.AddBooleanParameter("replaceMode", "replace", "True = replace existing values, False = add.", GH_ParamAccess.item, true);
+
+            int baselineIndex = p.AddGenericParameter(
+                "baseline",
+                "baseline",
+                "Optional data tree captured from GhcGetLoadDistOnFrames for diff/removal.",
+                GH_ParamAccess.tree);
+            p[baselineIndex].Optional = true;
+
+            p.AddBooleanParameter(
+                "autoRemove",
+                "autoRemove",
+                "When True, delete frame/pattern combos that disappear from Excel before re-assigning.",
+                GH_ParamAccess.item,
+                true);
+        }
+
+        protected override void RegisterOutputParams(GH_OutputParamManager p)
+        {
+            p.AddGenericParameter("values", "values", "Column-wise data tree (11 branches) read from Excel (header row excluded).", GH_ParamAccess.tree);
+            p.AddTextParameter("removed", "removed", "Frame/pattern pairs deleted prior to reassignment.", GH_ParamAccess.list);
+            p.AddTextParameter("messages", "messages", "Summary and diagnostic messages.", GH_ParamAccess.list);
+        }
+
+        protected override void SolveInstance(IGH_DataAccess da)
+        {
+            bool run = false;
+            cSapModel sapModel = null;
+            string excelPath = null;
+            string sheetName = "Assigned Loads On Frames";
+            bool replaceMode = true;
+            bool autoRemove = true;
+
+            GH_Structure<GH_ObjectWrapper> baselineTree;
+
+            da.GetData(0, ref run);
+            da.GetData(1, ref sapModel);
+            da.GetData(2, ref excelPath);
+            da.GetData(3, ref sheetName);
+            da.GetData(4, ref replaceMode);
+            da.GetDataTree(5, out baselineTree);
+            da.GetData(6, ref autoRemove);
+
+            bool rising = !_lastRun && run;
+            if (!rising)
+            {
+                da.SetDataTree(0, _lastValues.Duplicate());
+                da.SetDataList(1, _lastRemoved.ToArray());
+                da.SetDataList(2, _lastMessages.ToArray());
+                _lastRun = run;
+                return;
+            }
+
+            List<string> messages = new List<string>();
+            GH_Structure<GH_ObjectWrapper> valueTree = new GH_Structure<GH_ObjectWrapper>();
+            List<string> removedSummaries = new List<string>();
+            int scheduledRefreshCount = 0;
+
+            try
             {
                 if (sapModel == null)
                 {
