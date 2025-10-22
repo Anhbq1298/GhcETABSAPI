@@ -9,7 +9,7 @@
 // Inputs (ordered):
 //   0) run         (bool, item)   Rising-edge trigger.
 //   1) sapModel    (ETABSv1.cSapModel, item)  ETABS model from your Attach component.
-//   2) areaNames   (string, list) Area object names to query. Blank/dup ignored (case-insensitive).
+//   2) areaNames   (string, list) Area object names to query. Blank/dup ignored (case-insensitive). Leave empty to query all.
 //   3) loadPattern (string, list) OPTIONAL filters. If UNCONNECTED or empty → treated as null (no filter).
 //
 // Outputs:
@@ -75,7 +75,7 @@ namespace MGT
             int areaNameIndex = p.AddTextParameter(
                 "areaNames",
                 "areaNames",
-                "Area object names to query. Blank entries are ignored. If empty, returns zero results.",
+                "Area object names to query. Blank entries are ignored. Leave empty to query every area object.",
                 GH_ParamAccess.list);
             p[areaNameIndex].Optional = true;
 
@@ -128,6 +128,29 @@ namespace MGT
             try
             {
                 List<string> trimmed = NormalizeDistinct(areaNames);
+                bool autoFilledAllAreas = false;
+                bool attemptedAutoFill = trimmed.Count == 0;
+
+                if (attemptedAutoFill)
+                {
+                    HashSet<string> allAreas = TryGetExistingAreaNames(sapModel);
+                    if (allAreas != null && allAreas.Count > 0)
+                    {
+                        trimmed.AddRange(allAreas);
+                        trimmed.Sort(StringComparer.OrdinalIgnoreCase);
+                        autoFilledAllAreas = true;
+                    }
+                }
+
+                if (trimmed.Count == 0)
+                {
+                    string noAreasMessage = attemptedAutoFill
+                        ? "No area objects exist in the model."
+                        : "No valid area names provided.";
+
+                    UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), noAreasMessage, run);
+                    return;
+                }
 
                 var rawResult = GetAreaUniform(sapModel, trimmed);
 
@@ -138,12 +161,11 @@ namespace MGT
                 GH_Structure<GH_String> headerTree = BuildHeaderTree();
                 GH_Structure<GH_ObjectWrapper> valueTree = BuildValueTree(result);
 
+                string zeroTarget = autoFilledAllAreas ? "any area objects" : "the requested areas";
+                string positiveTarget = autoFilledAllAreas ? "all area objects" : "the requested areas";
+
                 string status;
-                if (trimmed.Count == 0)
-                {
-                    status = "No valid area names provided.";
-                }
-                else if (hasFilters)
+                if (hasFilters)
                 {
                     string patternSummary = FormatLoadPatternSummary(trimmedFilters);
 
@@ -151,7 +173,7 @@ namespace MGT
                     {
                         if (rawResult.total > 0)
                         {
-                            status = $"No uniform area loads matched {patternSummary}.";
+                            status = $"No uniform area loads matched {patternSummary} on {zeroTarget}.";
                             if (result.failCount > 0)
                             {
                                 status += $" {result.failCount} area calls failed.";
@@ -163,12 +185,12 @@ namespace MGT
                         }
                         else
                         {
-                            status = "No uniform area loads on the requested areas.";
+                            status = $"No uniform area loads on {zeroTarget}.";
                         }
                     }
                     else
                     {
-                        status = $"Returned {result.total} uniform area loads for {patternSummary}.";
+                        status = $"Returned {result.total} uniform area loads for {patternSummary} on {positiveTarget}.";
                         if (result.failCount > 0)
                         {
                             status += $" {result.failCount} area calls failed.";
@@ -186,8 +208,8 @@ namespace MGT
                 else
                 {
                     status = result.total == 0
-                        ? "No uniform area loads on the requested areas."
-                        : $"Returned {result.total} uniform area loads.";
+                        ? $"No uniform area loads on {zeroTarget}."
+                        : $"Returned {result.total} uniform area loads on {positiveTarget}.";
                 }
 
                 UpdateAndPushOutputs(da, headerTree, valueTree, status, run);

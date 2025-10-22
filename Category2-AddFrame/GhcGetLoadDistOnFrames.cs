@@ -8,7 +8,7 @@
 // -------------------------------------------------------------
 // Inputs (ordered):
 //   0) sapModel    (ETABSv1.cSapModel, item)  ETABS model from your Attach component.
-//   1) frameNames  (string, list)  Frame object names to query. Blank/dup ignored (case-insensitive).
+//   1) frameNames  (string, list)  Frame object names to query. Blank/dup ignored (case-insensitive). Leave empty to query all.
 //   2) loadPattern (string, list)  OPTIONAL filters. If UNCONNECTED or empty → treated as null (no filter).
 //
 // Outputs:
@@ -92,7 +92,7 @@ namespace MGT
             int frameNameIndex = p.AddTextParameter(
                 "frameNames",
                 "frameNames",
-                "Frame object names to query. Blank entries are ignored. If empty, returns zero results.",
+                "Frame object names to query. Blank entries are ignored. Leave empty to query every frame object.",
                 GH_ParamAccess.list);
             p[frameNameIndex].Optional = true;
 
@@ -146,6 +146,9 @@ namespace MGT
             {
                 List<string> trimmed = new List<string>();
                 HashSet<string> seen = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+                bool autoFilledAllFrames = false;
+                bool attemptedAutoFill = false;
+
                 if (frameNames != null)
                 {
                     for (int i = 0; i < frameNames.Count; i++)
@@ -162,6 +165,28 @@ namespace MGT
                             trimmed.Add(clean);
                         }
                     }
+                }
+
+                if (trimmed.Count == 0)
+                {
+                    attemptedAutoFill = true;
+                    HashSet<string> allFrames = TryGetExistingFrameNames(sapModel);
+                    if (allFrames != null && allFrames.Count > 0)
+                    {
+                        trimmed.AddRange(allFrames);
+                        trimmed.Sort(StringComparer.OrdinalIgnoreCase);
+                        autoFilledAllFrames = true;
+                    }
+                }
+
+                if (trimmed.Count == 0)
+                {
+                    string noFramesMessage = attemptedAutoFill
+                        ? "No frame objects exist in the model."
+                        : "No valid frame names provided.";
+
+                    UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), noFramesMessage, run);
+                    return;
                 }
 
                 var rawResult = GetFrameDistributed(sapModel, trimmed);
@@ -192,12 +217,11 @@ namespace MGT
                 GH_Structure<GH_String> headerTree = BuildHeaderTree();
                 GH_Structure<GH_ObjectWrapper> valueTree = BuildValueTree(result);
 
+                string zeroTarget = autoFilledAllFrames ? "any frame objects" : "the requested frames";
+                string positiveTarget = autoFilledAllFrames ? "all frame objects" : "the requested frames";
+
                 string status;
-                if (trimmed.Count == 0)
-                {
-                    status = "No valid frame names provided.";
-                }
-                else if (hasFilters)
+                if (hasFilters)
                 {
                     string patternSummary = FormatLoadPatternSummary(trimmedFilters);
 
@@ -205,7 +229,7 @@ namespace MGT
                     {
                         if (rawResult.total > 0)
                         {
-                            status = $"No distributed loads matched {patternSummary}.";
+                            status = $"No distributed loads matched {patternSummary} on {zeroTarget}.";
                             if (result.failCount > 0)
                             {
                                 status += $" {result.failCount} frame calls failed.";
@@ -217,12 +241,12 @@ namespace MGT
                         }
                         else
                         {
-                            status = "No distributed loads on the requested frames.";
+                            status = $"No distributed loads on {zeroTarget}.";
                         }
                     }
                     else
                     {
-                        status = $"Returned {result.total} distributed loads for {patternSummary}.";
+                        status = $"Returned {result.total} distributed loads for {patternSummary} on {positiveTarget}.";
                         if (result.failCount > 0)
                         {
                             status += $" {result.failCount} frame calls failed.";
@@ -240,8 +264,8 @@ namespace MGT
                 else
                 {
                     status = result.total == 0
-                        ? "No distributed loads on the requested frames."
-                        : $"Returned {result.total} distributed loads.";
+                        ? $"No distributed loads on {zeroTarget}."
+                        : $"Returned {result.total} distributed loads on {positiveTarget}.";
                 }
 
                 UpdateAndPushOutputs(da, headerTree, valueTree, status, run);
