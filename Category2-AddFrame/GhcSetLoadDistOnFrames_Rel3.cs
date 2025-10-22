@@ -134,7 +134,7 @@ namespace MGT
             bool replaceMode = true;
             bool autoRemove = true;
 
-            GH_Structure<GH_ObjectWrapper> baselineTree;
+            GH_Structure<IGH_Goo> baselineTree;
 
             da.GetData(0, ref run);
             da.GetData(1, ref sapModel);
@@ -504,7 +504,7 @@ namespace MGT
             return combos;
         }
 
-        private static HashSet<FramePatternKey> CollectCombosFromValueTree(GH_Structure<GH_ObjectWrapper> tree)
+        private static HashSet<FramePatternKey> CollectCombosFromValueTree(GH_Structure<IGH_Goo> tree)
         {
             HashSet<FramePatternKey> combos = new HashSet<FramePatternKey>();
             if (tree == null)
@@ -547,25 +547,38 @@ namespace MGT
                 return string.Empty;
             }
 
-            GH_ObjectWrapper goo = branch[index] as GH_ObjectWrapper;
+            IGH_Goo goo = branch[index] as IGH_Goo;
             if (goo == null)
             {
                 return string.Empty;
             }
 
-            object value = goo.Value;
-            if (value == null)
-            {
-                return string.Empty;
-            }
-
-            if (value is GH_String ghString)
+            if (goo is GH_String ghString)
             {
                 string candidate = ghString.Value;
                 return string.IsNullOrWhiteSpace(candidate) ? string.Empty : candidate.Trim();
             }
 
-            string result = Convert.ToString(value, CultureInfo.InvariantCulture);
+            if (goo is GH_ObjectWrapper wrapper)
+            {
+                object wrapped = wrapper.Value;
+                if (wrapped is GH_String wrappedString)
+                {
+                    string candidate = wrappedString.Value;
+                    return string.IsNullOrWhiteSpace(candidate) ? string.Empty : candidate.Trim();
+                }
+
+                string wrappedText = Convert.ToString(wrapped, CultureInfo.InvariantCulture);
+                return string.IsNullOrWhiteSpace(wrappedText) ? string.Empty : wrappedText.Trim();
+            }
+
+            if (GH_Convert.ToString(goo, out string converted, GH_Conversion.Both))
+            {
+                return string.IsNullOrWhiteSpace(converted) ? string.Empty : converted.Trim();
+            }
+
+            object scriptValue = goo.ScriptVariable();
+            string result = Convert.ToString(scriptValue, CultureInfo.InvariantCulture);
             return string.IsNullOrWhiteSpace(result) ? string.Empty : result.Trim();
         }
 
