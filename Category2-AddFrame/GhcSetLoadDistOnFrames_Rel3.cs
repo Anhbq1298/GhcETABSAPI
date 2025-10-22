@@ -49,6 +49,7 @@
 // -------------------------------------------------------------
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -79,7 +80,7 @@ namespace MGT
         {
         }
 
-        public override Guid ComponentGuid => new Guid("4A2E7146-0E8B-4E78-86CF-2EFC40306392");
+        public override Guid ComponentGuid => new Guid("4A2E7146-0E8B-4E78-86CF-2EFC40306391");
 
         protected override Bitmap Icon
         {
@@ -514,8 +515,8 @@ namespace MGT
             GH_Path framePath = new GH_Path(0);
             GH_Path patternPath = new GH_Path(1);
 
-            IList<GH_ObjectWrapper> frameBranch = tree.get_Branch(framePath);
-            IList<GH_ObjectWrapper> patternBranch = tree.get_Branch(patternPath);
+            IList frameBranch = tree.get_Branch(framePath);
+            IList patternBranch = tree.get_Branch(patternPath);
 
             if (frameBranch == null || patternBranch == null)
             {
@@ -539,14 +540,14 @@ namespace MGT
             return combos;
         }
 
-        private static string GooToTrimmedString(IList<GH_ObjectWrapper> branch, int index)
+        private static string GooToTrimmedString(IList branch, int index)
         {
             if (branch == null || index < 0 || index >= branch.Count)
             {
                 return string.Empty;
             }
 
-            GH_ObjectWrapper goo = branch[index];
+            GH_ObjectWrapper goo = branch[index] as GH_ObjectWrapper;
             if (goo == null)
             {
                 return string.Empty;
