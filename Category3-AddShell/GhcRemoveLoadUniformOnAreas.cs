@@ -41,7 +41,7 @@ namespace MGT
           : base(
                 "Remove Area Uniform Loads",
                 "RemoveAreaUDL",
-                "Remove uniform load assignments from ETABS area objects (per object mode).\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
+                "Rising-edge trigger that clears uniform load assignments from the targeted ETABS area objects. Leave 'areaNames' empty to process every area, and use optional 'loadPatterns' to restrict which loads are removed.\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                 "MGT",
                 "3.0 Area Object Modelling")
         {
@@ -58,7 +58,7 @@ namespace MGT
             int areaIndex = p.AddTextParameter(
                 "areaNames",
                 "areaNames",
-                "Area object names to process. Blank entries are ignored. Duplicate names are removed (case-insensitive).",
+                "Area object names to process. Leave empty to query every area. Blank entries are ignored. Duplicate names are removed (case-insensitive).",
                 GH_ParamAccess.list);
             p[areaIndex].Optional = true;
 

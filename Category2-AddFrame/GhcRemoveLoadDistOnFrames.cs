@@ -41,7 +41,7 @@ namespace MGT
           : base(
                 "Remove Frame Distributed Loads",
                 "RemoveFrameUDL",
-                "Remove distributed load assignments from ETABS frame objects (per object mode).\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
+                "Rising-edge trigger that clears distributed load assignments from the targeted ETABS frame objects. Leave 'frameNames' empty to process every frame, and use optional 'loadPatterns' to restrict which loads are removed.\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                 "MGT",
                 "2.0 Frame Object Modelling")
         {
@@ -58,7 +58,7 @@ namespace MGT
             int frameIndex = p.AddTextParameter(
                 "frameNames",
                 "frameNames",
-                "Frame object names to process. Blank entries are ignored. Duplicate names are removed (case-insensitive).",
+                "Frame object names to process. Leave empty to query every frame. Blank entries are ignored. Duplicate names are removed (case-insensitive).",
                 GH_ParamAccess.list);
             p[frameIndex].Optional = true;
 
