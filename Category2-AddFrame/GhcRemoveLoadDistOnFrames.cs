@@ -96,6 +96,7 @@ namespace MGT
             }
 
             List<string> messages = new List<string>();
+            int scheduledRefreshCount = 0;
 
             try
             {
@@ -236,16 +237,18 @@ namespace MGT
                     messages.Add("Load query failed for frames: " + string.Join(", ", queryFailedNames));
                 }
 
-                try
+                if (removedLoads > 0)
                 {
-                    if (removedLoads > 0)
+                    try
                     {
                         sapModel.View.RefreshView(0, false);
                     }
-                }
-                catch
-                {
-                    // ignored
+                    catch
+                    {
+                        // ignored
+                    }
+
+                    scheduledRefreshCount = TriggerGetComponentRefresh();
                 }
             }
             catch (Exception ex)
@@ -253,7 +256,58 @@ namespace MGT
                 messages.Add("Error: " + ex.Message);
             }
 
+            if (scheduledRefreshCount > 0)
+            {
+                messages.Add($"Scheduled refresh for {Plural(scheduledRefreshCount, \"Get Frame Distributed Loads component\")}.");
+            }
+
             PushOutputs(da, messages, run);
+        }
+
+        private int TriggerGetComponentRefresh()
+        {
+            try
+            {
+                GH_Document document = OnPingDocument();
+                if (document == null)
+                {
+                    return 0;
+                }
+
+                List<GhcGetLoadDistOnFrames> targets = new List<GhcGetLoadDistOnFrames>();
+                foreach (IGH_DocumentObject obj in document.Objects)
+                {
+                    if (obj is GhcGetLoadDistOnFrames getComponent &&
+                        ReferenceEquals(getComponent.OnPingDocument(), document) &&
+                        !getComponent.Locked &&
+                        !getComponent.Hidden)
+                    {
+                        targets.Add(getComponent);
+                    }
+                }
+
+                if (targets.Count == 0)
+                {
+                    return 0;
+                }
+
+                document.ScheduleSolution(5, _ =>
+                {
+                    foreach (GhcGetLoadDistOnFrames target in targets)
+                    {
+                        if (!target.Locked && !target.Hidden)
+                        {
+                            target.ExpireSolution(false);
+                        }
+                    }
+                });
+
+                return targets.Count;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private void PushOutputs(IGH_DataAccess da, List<string> messages, bool currentRunState)
