@@ -63,7 +63,7 @@ namespace MGT
           : base(
                 "Get Frame Distributed Loads",
                 "GetFrameDistLoads",
-                "Query distributed loads assigned to ETABS frame objects (per object mode).",
+                "Query distributed loads assigned to ETABS frame objects (per object mode).\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                 "MGT",
                 "2.0 Frame Object Modelling")
         {

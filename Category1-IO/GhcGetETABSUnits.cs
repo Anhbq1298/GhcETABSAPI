@@ -19,7 +19,7 @@ namespace MGT
         public GhcGetETABSUnits()
           : base("Get ETABS Units", 
                 "ETABSUnits",
-                 "Get current ETABS working units (force/length/temperature)",
+                 "Get current ETABS working units (force/length/temperature)\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                  "MGT", // Category (tab)
                  "01. IO" // Subcategory (panel)
                 )
