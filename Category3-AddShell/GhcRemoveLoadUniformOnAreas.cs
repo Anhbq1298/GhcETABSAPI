@@ -96,6 +96,7 @@ namespace MGT
             }
 
             List<string> messages = new List<string>();
+            int scheduledRefreshCount = 0;
 
             try
             {
@@ -236,11 +237,17 @@ namespace MGT
                 if (removedLoads > 0)
                 {
                     TryRefreshView(sapModel);
+                    scheduledRefreshCount = TriggerGetComponentRefresh();
                 }
             }
             catch (Exception ex)
             {
                 messages.Add("Error: " + ex.Message);
+            }
+
+            if (scheduledRefreshCount > 0)
+            {
+                messages.Add($"Scheduled refresh for {Plural(scheduledRefreshCount, "Get Area Uniform Loads component")}.");
             }
 
             PushOutputs(da, messages, run);
@@ -253,6 +260,52 @@ namespace MGT
             _lastMessages.Clear();
             _lastMessages.AddRange(messages);
             _lastRun = currentRunState;
+        }
+
+        private int TriggerGetComponentRefresh()
+        {
+            try
+            {
+                GH_Document document = OnPingDocument();
+                if (document == null)
+                {
+                    return 0;
+                }
+
+                List<GhcGetLoadUniformOnAreas> targets = new List<GhcGetLoadUniformOnAreas>();
+                foreach (IGH_DocumentObject obj in document.Objects)
+                {
+                    if (obj is GhcGetLoadUniformOnAreas getComponent &&
+                        ReferenceEquals(getComponent.OnPingDocument(), document) &&
+                        !getComponent.Locked &&
+                        !getComponent.Hidden)
+                    {
+                        targets.Add(getComponent);
+                    }
+                }
+
+                if (targets.Count == 0)
+                {
+                    return 0;
+                }
+
+                document.ScheduleSolution(5, _ =>
+                {
+                    foreach (GhcGetLoadUniformOnAreas target in targets)
+                    {
+                        if (!target.Locked && !target.Hidden)
+                        {
+                            target.ExpireSolution(false);
+                        }
+                    }
+                });
+
+                return targets.Count;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private static (bool success, List<UniformLoadEntry> entries) CollectUniformLoads(cSapModel model, string areaName)
