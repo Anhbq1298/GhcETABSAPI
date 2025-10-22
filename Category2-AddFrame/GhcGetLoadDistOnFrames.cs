@@ -32,6 +32,7 @@ using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
 using ETABSv1;
+using System.Drawing;
 
 namespace MGT
 {
@@ -70,8 +71,18 @@ namespace MGT
         }
 
         public override Guid ComponentGuid => new Guid("a1cfe4a7-9d49-42eb-aac9-774cdd7d1e84");
-
-        protected override System.Drawing.Bitmap Icon => null;
+        protected override Bitmap Icon
+        {
+            get
+            {
+                try
+                {
+                    Bitmap raw = Properties.Resources.GetLoadDistOnFramesIcon;
+                    return new Bitmap(raw, new Size(24, 24));
+                }
+                catch { return null; }
+            }
+        }
 
         protected override void RegisterInputParams(GH_InputParamManager p)
         {

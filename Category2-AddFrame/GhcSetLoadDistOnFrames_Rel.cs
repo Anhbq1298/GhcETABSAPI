@@ -57,7 +57,18 @@ namespace MGT
 
         public override Guid ComponentGuid => new Guid("8AA2C49F-30B1-4E21-803C-5F85AB4A0C5B");
 
-        protected override Bitmap Icon => null;
+        protected override Bitmap Icon
+        {
+            get
+            {
+                try
+                {
+                    Bitmap raw = Properties.Resources.SetLoadDistOnFramesIcon;
+                    return new Bitmap(raw, new Size(24, 24));
+                }
+                catch { return null; }
+            }
+        }
 
         protected override void RegisterInputParams(GH_InputParamManager p)
         {

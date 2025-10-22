@@ -113,9 +113,29 @@ namespace MGT.Properties {
         /// <summary>
         ///   Looks up a localized resource of type System.Drawing.Bitmap.
         /// </summary>
+        internal static System.Drawing.Bitmap GetLoadDistOnFramesIcon {
+            get {
+                object obj = ResourceManager.GetObject("GetLoadDistOnFramesIcon", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized resource of type System.Drawing.Bitmap.
+        /// </summary>
         internal static System.Drawing.Bitmap getRhinoUnitIcon {
             get {
                 object obj = ResourceManager.GetObject("getRhinoUnitIcon", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized resource of type System.Drawing.Bitmap.
+        /// </summary>
+        internal static System.Drawing.Bitmap SetLoadDistOnFramesIcon {
+            get {
+                object obj = ResourceManager.GetObject("SetLoadDistOnFramesIcon", resourceCulture);
                 return ((System.Drawing.Bitmap)(obj));
             }
         }
