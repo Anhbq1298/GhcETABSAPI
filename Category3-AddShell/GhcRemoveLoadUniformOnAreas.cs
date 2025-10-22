@@ -233,16 +233,9 @@ namespace MGT
                     messages.Add("Load query failed for areas: " + string.Join(", ", queryFailedNames));
                 }
 
-                try
+                if (removedLoads > 0)
                 {
-                    if (removedLoads > 0)
-                    {
-                        sapModel.View.RefreshView(0, false);
-                    }
-                }
-                catch
-                {
-                    // ignored
+                    TryRefreshView(sapModel);
                 }
             }
             catch (Exception ex)
@@ -348,21 +341,6 @@ namespace MGT
             }
         }
 
-        private static string FormatLoadPatternSummary(IReadOnlyList<string> filters)
-        {
-            if (filters == null || filters.Count == 0)
-            {
-                return string.Empty;
-            }
-
-            if (filters.Count == 1)
-            {
-                return $"load pattern \"{filters[0]}\"";
-            }
-
-            return $"load patterns ({string.Join(", ", filters)})";
-        }
-
         private static string SafeArrayValue(string[] source, int index)
         {
             if (source == null || index < 0 || index >= source.Length)
@@ -387,46 +365,6 @@ namespace MGT
             }
 
             return value;
-        }
-
-        private static HashSet<string> TryGetExistingAreaNames(cSapModel model)
-        {
-            if (model == null)
-            {
-                return null;
-            }
-
-            try
-            {
-                int count = 0;
-                string[] names = null;
-                int ret = model.AreaObj.GetNameList(ref count, ref names);
-                if (ret != 0)
-                {
-                    return null;
-                }
-
-                HashSet<string> result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (names == null)
-                {
-                    return result;
-                }
-
-                for (int i = 0; i < names.Length; i++)
-                {
-                    string nm = names[i];
-                    if (!string.IsNullOrWhiteSpace(nm))
-                    {
-                        result.Add(nm.Trim());
-                    }
-                }
-
-                return result;
-            }
-            catch
-            {
-                return null;
-            }
         }
 
         private class UniformLoadEntry

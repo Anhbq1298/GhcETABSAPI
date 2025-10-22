@@ -508,21 +508,6 @@ namespace MGT
         private static readonly double DistanceTolerance = 1e-6;
         private static readonly double LengthTolerance = 1e-9;
 
-        private static string FormatLoadPatternSummary(IReadOnlyList<string> filters)
-        {
-            if (filters == null || filters.Count == 0)
-            {
-                return string.Empty;
-            }
-
-            if (filters.Count == 1)
-            {
-                return $"load pattern \"{filters[0]}\"";
-            }
-
-            return $"load patterns ({string.Join(", ", filters)})";
-        }
-
         private static bool TryResolveDistances(
             double? frameLength,
             double? relDist1In,

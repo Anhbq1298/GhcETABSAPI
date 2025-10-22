@@ -374,21 +374,6 @@ namespace MGT
             }
         }
 
-        private static string FormatLoadPatternSummary(IReadOnlyList<string> filters)
-        {
-            if (filters == null || filters.Count == 0)
-            {
-                return string.Empty;
-            }
-
-            if (filters.Count == 1)
-            {
-                return $"load pattern \"{filters[0]}\"";
-            }
-
-            return $"load patterns ({string.Join(", ", filters)})";
-        }
-
         private static string SafeArrayValue(string[] source, int index)
         {
             if (source == null || index < 0 || index >= source.Length)
