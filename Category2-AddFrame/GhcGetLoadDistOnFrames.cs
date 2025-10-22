@@ -33,6 +33,7 @@ using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
 using ETABSv1;
 using System.Drawing;
+using static MGT.ComponentShared;
 
 namespace MGT
 {
@@ -683,13 +684,6 @@ namespace MGT
             }
 
             clamped = Math.Abs(value - original) > DistanceTolerance * Math.Max(1.0, max);
-            return value;
-        }
-
-        private static double Clamp01(double value)
-        {
-            if (value < 0.0) return 0.0;
-            if (value > 1.0) return 1.0;
             return value;
         }
 
