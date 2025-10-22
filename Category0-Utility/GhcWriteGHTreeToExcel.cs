@@ -51,7 +51,7 @@ namespace MGT
           : base(
                 "Write Tree To Excel",
                 "WriteTreeExcel",
-                "Write a Grasshopper data tree to an Excel worksheet. Each path becomes a column and the branch values populate rows.",
+                "Write a Grasshopper data tree to an Excel worksheet. Each path becomes a column and the branch values populate rows.\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                 "MGT",
                 "0.0 Utility")
         { }

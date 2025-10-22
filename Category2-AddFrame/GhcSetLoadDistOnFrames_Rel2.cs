@@ -1,4 +1,4 @@
-// -------------------------------------------------------------
+﻿// -------------------------------------------------------------
 // Component : Set Frame Distributed Loads (relative, Excel-driven)
 // Author    : Anh Bui (extended)
 // Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
@@ -51,7 +51,7 @@ namespace MGT
           : base(
                 "Set Frame Distributed Loads (Rel, Excel)",
                 "SetFrameUDLRelXl",
-                "Assign distributed loads to ETABS frame objects by reading an Excel worksheet.",
+                "Assign distributed loads to ETABS frame objects by reading an Excel worksheet.\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                 "MGT",
                 "2.0 Frame Object Modelling")
         {

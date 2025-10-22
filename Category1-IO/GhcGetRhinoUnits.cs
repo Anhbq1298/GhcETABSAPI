@@ -29,7 +29,7 @@ namespace MGT
         public GhcGetRhinoUnits()
           : base("Get Rhino Units", // Display name
                 "RhUnits", // Nickname
-                 "Return the current Rhino model unit system (name and abbreviation).",
+                 "Return the current Rhino model unit system (name and abbreviation).\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                  "MGT", // Category (tab)
                  "01. IO" // Subcategory (panel)
                 )

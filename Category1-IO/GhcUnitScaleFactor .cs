@@ -30,7 +30,7 @@ namespace MGT
     {
         public GhcUnitScaleFactor()
           : base("Unit Scale Factor", "UnitScale",
-                 "Compute scale factor to convert from one length unit to another.",
+                 "Compute scale factor to convert from one length unit to another.\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                  "MGT", "01. IO")
         { }
 

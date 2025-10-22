@@ -1,4 +1,4 @@
-// -------------------------------------------------------------
+﻿// -------------------------------------------------------------
 // Component : Set Frame Distributed Loads (relative distances)
 // Author    : Anh Bui
 // Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
@@ -49,7 +49,7 @@ namespace MGT
           : base(
                 "Set Frame Distributed Loads (Rel)",
                 "SetFrameUDLRel",
-                "Assign distributed loads to ETABS frame objects using relative distances (0..1).",
+                "Assign distributed loads to ETABS frame objects using relative distances (0..1).\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                 "MGT",
                 "2.0 Frame Object Modelling")
         {

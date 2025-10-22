@@ -41,8 +41,7 @@ namespace MGT
           : base(
                 "Add Frames to Group",
                 "FrToGroup",
-                "Add ETABS frame objects to a group (auto-define with SetGroup_1, minimal)." +
-                "Developed by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
+                "Add ETABS frame objects to a group (auto-define with SetGroup_1, minimal).\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                 "MGT",
                 "2.0 Frame Object Modelling")
         { }

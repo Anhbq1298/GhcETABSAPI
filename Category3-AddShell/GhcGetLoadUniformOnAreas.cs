@@ -1,4 +1,4 @@
-// -------------------------------------------------------------
+﻿// -------------------------------------------------------------
 // Component : Get Area Uniform Loads (per-object query)
 // Author    : Anh Bui
 // Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
@@ -57,7 +57,7 @@ namespace MGT
           : base(
                 "Get Area Uniform Loads",
                 "GetAreaLoads",
-                "Query uniform surface loads assigned to ETABS area objects (per object mode).",
+                "Query uniform surface loads assigned to ETABS area objects (per object mode).\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                 "MGT",
                 "3.0 Area Object Modelling"  )
         {

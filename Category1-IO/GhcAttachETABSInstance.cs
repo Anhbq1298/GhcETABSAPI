@@ -1,4 +1,4 @@
-// -------------------------------------------------------------
+﻿// -------------------------------------------------------------
 // Component : ETABS Attach (minimal)
 // Author    : Anh Bui
 // Target    : Rhino 7/8 + Grasshopper (.NET Framework 4.8 x64)
@@ -32,7 +32,7 @@ namespace MGT
     {
         public GhcAttachETABSInstance()
           : base("ETABS Attach", "ETABSAttach",
-                 "Attach to a running ETABS instance and return cOAPI & cSapModel.",
+                 "Attach to a running ETABS instance and return cOAPI & cSapModel.\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                  "MGT", // Category (tab)
                  "01. IO" // Subcategory (panel)
                 )
