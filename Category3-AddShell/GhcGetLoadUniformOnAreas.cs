@@ -7,10 +7,9 @@
 // GUID      : 77f15ab0-1587-4e9b-8a47-335c50a62ddb
 // -------------------------------------------------------------
 // Inputs (ordered):
-//   0) run         (bool, item)   Rising-edge trigger.
-//   1) sapModel    (ETABSv1.cSapModel, item)  ETABS model from your Attach component.
-//   2) areaNames   (string, list) Area object names to query. Blank/dup ignored (case-insensitive). Leave empty to query all.
-//   3) loadPattern (string, list) OPTIONAL filters. If UNCONNECTED or empty → treated as null (no filter).
+//   0) sapModel    (ETABSv1.cSapModel, item)  ETABS model from your Attach component.
+//   1) areaNames   (string, list) Area object names to query. Blank/dup ignored (case-insensitive). Leave empty to query all.
+//   2) loadPattern (string, list) OPTIONAL filters. If UNCONNECTED or empty → treated as null (no filter).
 //
 // Outputs:
 //   0) header  (text, tree)   Single branch of column labels.
@@ -38,8 +37,6 @@ namespace MGT
 {
     public class GhcGetLoadUniformOnAreas : GH_Component
     {
-        private const string IdleMessage = "Idle.";
-
         private static readonly string[] HeaderLabels =
         {
             "AreaName",
@@ -48,11 +45,6 @@ namespace MGT
             "Direction",
             "Value"
         };
-
-        private bool lastRun;
-        private GH_Structure<GH_String> lastHeaderTree = BuildHeaderTree();
-        private GH_Structure<GH_ObjectWrapper> lastValueTree = new GH_Structure<GH_ObjectWrapper>();
-        private string lastMessage = IdleMessage;
 
         public GhcGetLoadUniformOnAreas()
           : base(
@@ -70,7 +62,6 @@ namespace MGT
 
         protected override void RegisterInputParams(GH_InputParamManager p)
         {
-            p.AddBooleanParameter("run", "run", "Press to query (rising edge trigger).", GH_ParamAccess.item, false);
             p.AddGenericParameter("sapModel", "sapModel", "ETABS cSapModel from the Attach component.", GH_ParamAccess.item);
             int areaNameIndex = p.AddTextParameter(
                 "areaNames",
@@ -96,32 +87,19 @@ namespace MGT
 
         protected override void SolveInstance(IGH_DataAccess da)
         {
-            bool run = false;
             cSapModel sapModel = null;
             List<string> areaNames = new List<string>();
             List<string> loadPatternFilters = new List<string>();
 
-            da.GetData(0, ref run);
-            da.GetData(1, ref sapModel);
-            da.GetDataList(2, areaNames);
-            da.GetDataList(3, loadPatternFilters);
-
-            bool rising = !lastRun && run;
-
-            if (!rising)
-            {
-                da.SetDataTree(0, lastHeaderTree.Duplicate());
-                da.SetDataTree(1, lastValueTree.Duplicate());
-                da.SetData(2, lastMessage);
-                lastRun = run;
-                return;
-            }
+            da.GetData(0, ref sapModel);
+            da.GetDataList(1, areaNames);
+            da.GetDataList(2, loadPatternFilters);
 
             if (sapModel == null)
             {
                 string warning = "sapModel is null. Wire it from the Attach component.";
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, warning);
-                UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), warning, run);
+                UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), warning);
                 return;
             }
 
@@ -148,7 +126,7 @@ namespace MGT
                         ? "No area objects exist in the model."
                         : "No valid area names provided.";
 
-                    UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), noAreasMessage, run);
+                    UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), noAreasMessage);
                     return;
                 }
 
@@ -212,13 +190,13 @@ namespace MGT
                         : $"Returned {result.total} uniform area loads on {positiveTarget}.";
                 }
 
-                UpdateAndPushOutputs(da, headerTree, valueTree, status, run);
+                UpdateAndPushOutputs(da, headerTree, valueTree, status);
             }
             catch (Exception ex)
             {
                 string errorMessage = "Error: " + ex.Message;
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Error, ex.Message);
-                UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), errorMessage, run);
+                UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), errorMessage);
             }
         }
 
@@ -394,18 +372,11 @@ namespace MGT
             IGH_DataAccess da,
             GH_Structure<GH_String> headerTree,
             GH_Structure<GH_ObjectWrapper> valueTree,
-            string message,
-            bool currentRunState)
+            string message)
         {
-            lastHeaderTree = headerTree.Duplicate();
-            lastValueTree = valueTree.Duplicate();
-            lastMessage = message;
-
             da.SetDataTree(0, headerTree);
             da.SetDataTree(1, valueTree);
             da.SetData(2, message);
-
-            lastRun = currentRunState;
         }
     }
 }
