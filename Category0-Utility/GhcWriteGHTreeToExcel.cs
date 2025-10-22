@@ -58,7 +58,18 @@ namespace MGT
 
         public override Guid ComponentGuid => new Guid("8f222ec4-2d36-4b3c-9a36-3a642c224f2f");
 
-        protected override Bitmap Icon => null;
+        protected override Bitmap Icon
+        {
+            get
+            {
+                try
+                {
+                    Bitmap raw = Properties.Resources.excelIcon;
+                    return new Bitmap(raw, new Size(24, 24));
+                }
+                catch { return null; }
+            }
+        }
 
         protected override void RegisterInputParams(GH_InputParamManager p)
         {

@@ -23,7 +23,7 @@
 //       [0] FrameName, [1] LoadPattern, [2] Type, [3] CoordinateSystem, [4] Direction,
 //       [5] RelDist1, [6] RelDist2, [7] Dist1, [8] Dist2, [9] Value1, [10] Value2.
 //   • Uses per-object mode: FrameObj.GetLoadDistributed(..., eItemType.Objects).
-//   • CoordinateSystem is derived from Direction (|dir| < 10 ⇒ "Local", otherwise "Global").
+//   • CoordinateSystem is derived from Direction (|dir| < 4 ⇒ "Local", otherwise "Global").
 // -------------------------------------------------------------
 
 using System;
