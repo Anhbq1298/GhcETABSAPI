@@ -96,6 +96,7 @@ namespace MGT
             }
 
             List<string> messages = new List<string>();
+            int scheduledRefreshCount = 0;
 
             try
             {
@@ -104,10 +105,24 @@ namespace MGT
                     throw new InvalidOperationException("sapModel is null. Wire it from the Attach component.");
                 }
 
+                HashSet<string> existingNames = TryGetExistingAreaNames(sapModel);
+
                 List<string> cleanedAreas = NormalizeDistinct(areaNames);
+                bool autoFilledAllAreas = false;
+                bool attemptedAutoFill = cleanedAreas.Count == 0;
+
+                if (attemptedAutoFill && existingNames != null && existingNames.Count > 0)
+                {
+                    cleanedAreas.AddRange(existingNames);
+                    cleanedAreas.Sort(StringComparer.OrdinalIgnoreCase);
+                    autoFilledAllAreas = true;
+                }
+
                 if (cleanedAreas.Count == 0)
                 {
-                    messages.Add("No valid area names provided.");
+                    messages.Add(attemptedAutoFill
+                        ? "No area objects exist in the model."
+                        : "No valid area names provided.");
                     PushOutputs(da, messages, run);
                     return;
                 }
@@ -120,7 +135,10 @@ namespace MGT
                 }
 
                 EnsureModelUnlocked(sapModel);
-                HashSet<string> existingNames = TryGetExistingAreaNames(sapModel);
+                if (existingNames == null)
+                {
+                    existingNames = TryGetExistingAreaNames(sapModel);
+                }
 
                 int areasMissing = 0;
                 int queryFailures = 0;
@@ -197,6 +215,8 @@ namespace MGT
                     }
                 }
 
+                string zeroTarget = autoFilledAllAreas ? "any area objects" : "the specified areas";
+
                 if (removedLoads > 0)
                 {
                     messages.Add($"Removed {Plural(removedLoads, "uniform load assignment")} from {Plural(areasModified.Count, "area")}.");
@@ -209,12 +229,12 @@ namespace MGT
                 {
                     if (patternSet == null)
                     {
-                        messages.Add("No uniform loads found on the specified areas.");
+                        messages.Add($"No uniform loads found on {zeroTarget}.");
                     }
                     else
                     {
                         string summary = FormatLoadPatternSummary(cleanedPatterns);
-                        messages.Add($"No uniform loads matched {summary} on the specified areas.");
+                        messages.Add($"No uniform loads matched {summary} on {zeroTarget}.");
                     }
                 }
 
@@ -236,11 +256,17 @@ namespace MGT
                 if (removedLoads > 0)
                 {
                     TryRefreshView(sapModel);
+                    scheduledRefreshCount = TriggerGetComponentRefresh();
                 }
             }
             catch (Exception ex)
             {
                 messages.Add("Error: " + ex.Message);
+            }
+
+            if (scheduledRefreshCount > 0)
+            {
+                messages.Add($"Scheduled refresh for {Plural(scheduledRefreshCount, "Get Area Uniform Loads component")}.");
             }
 
             PushOutputs(da, messages, run);
@@ -253,6 +279,52 @@ namespace MGT
             _lastMessages.Clear();
             _lastMessages.AddRange(messages);
             _lastRun = currentRunState;
+        }
+
+        private int TriggerGetComponentRefresh()
+        {
+            try
+            {
+                GH_Document document = OnPingDocument();
+                if (document == null)
+                {
+                    return 0;
+                }
+
+                List<GhcGetLoadUniformOnAreas> targets = new List<GhcGetLoadUniformOnAreas>();
+                foreach (IGH_DocumentObject obj in document.Objects)
+                {
+                    if (obj is GhcGetLoadUniformOnAreas getComponent &&
+                        ReferenceEquals(getComponent.OnPingDocument(), document) &&
+                        !getComponent.Locked &&
+                        !getComponent.Hidden)
+                    {
+                        targets.Add(getComponent);
+                    }
+                }
+
+                if (targets.Count == 0)
+                {
+                    return 0;
+                }
+
+                document.ScheduleSolution(5, _ =>
+                {
+                    foreach (GhcGetLoadUniformOnAreas target in targets)
+                    {
+                        if (!target.Locked && !target.Hidden)
+                        {
+                            target.ExpireSolution(false);
+                        }
+                    }
+                });
+
+                return targets.Count;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private static (bool success, List<UniformLoadEntry> entries) CollectUniformLoads(cSapModel model, string areaName)
