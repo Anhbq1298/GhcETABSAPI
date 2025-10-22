@@ -258,7 +258,7 @@ namespace MGT
 
             if (scheduledRefreshCount > 0)
             {
-                messages.Add($"Scheduled refresh for {Plural(scheduledRefreshCount, \"Get Frame Distributed Loads component\")}.");
+                messages.Add($"Scheduled refresh for {Plural(scheduledRefreshCount, "Get Frame Distributed Loads component")}.");
             }
 
             PushOutputs(da, messages, run);
