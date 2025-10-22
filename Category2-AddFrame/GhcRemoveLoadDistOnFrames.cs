@@ -105,10 +105,24 @@ namespace MGT
                     throw new InvalidOperationException("sapModel is null. Wire it from the Attach component.");
                 }
 
+                HashSet<string> existingNames = TryGetExistingFrameNames(sapModel);
+
                 List<string> cleanedFrames = NormalizeDistinct(frameNames);
+                bool autoFilledAllFrames = false;
+                bool attemptedAutoFill = cleanedFrames.Count == 0;
+
+                if (attemptedAutoFill && existingNames != null && existingNames.Count > 0)
+                {
+                    cleanedFrames.AddRange(existingNames);
+                    cleanedFrames.Sort(StringComparer.OrdinalIgnoreCase);
+                    autoFilledAllFrames = true;
+                }
+
                 if (cleanedFrames.Count == 0)
                 {
-                    messages.Add("No valid frame names provided.");
+                    messages.Add(attemptedAutoFill
+                        ? "No frame objects exist in the model."
+                        : "No valid frame names provided.");
                     PushOutputs(da, messages, run);
                     return;
                 }
@@ -121,7 +135,10 @@ namespace MGT
                 }
 
                 EnsureModelUnlocked(sapModel);
-                HashSet<string> existingNames = TryGetExistingFrameNames(sapModel);
+                if (existingNames == null)
+                {
+                    existingNames = TryGetExistingFrameNames(sapModel);
+                }
 
                 int framesMissing = 0;
                 int queryFailures = 0;
@@ -201,6 +218,8 @@ namespace MGT
 
                 }
 
+                string zeroTarget = autoFilledAllFrames ? "any frame objects" : "the specified frames";
+
                 if (removedLoads > 0)
                 {
                     messages.Add($"Removed {Plural(removedLoads, "distributed load assignment")} from {Plural(framesModified.Count, "frame")}.");
@@ -213,12 +232,12 @@ namespace MGT
                 {
                     if (patternSet == null)
                     {
-                        messages.Add("No distributed loads found on the specified frames.");
+                        messages.Add($"No distributed loads found on {zeroTarget}.");
                     }
                     else
                     {
                         string summary = FormatLoadPatternSummary(cleanedPatterns);
-                        messages.Add($"No distributed loads matched {summary} on the specified frames.");
+                        messages.Add($"No distributed loads matched {summary} on {zeroTarget}.");
                     }
                 }
 
