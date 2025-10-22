@@ -158,5 +158,77 @@ namespace MGT
 
             return result;
         }
+
+        internal static HashSet<string> TryGetExistingAreaNames(cSapModel model)
+        {
+            if (model == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                int count = 0;
+                string[] names = null;
+                int ret = model.AreaObj.GetNameList(ref count, ref names);
+                if (ret != 0)
+                {
+                    return null;
+                }
+
+                HashSet<string> result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (names == null)
+                {
+                    return result;
+                }
+
+                for (int i = 0; i < names.Length; i++)
+                {
+                    string nm = names[i];
+                    if (!string.IsNullOrWhiteSpace(nm))
+                    {
+                        result.Add(nm.Trim());
+                    }
+                }
+
+                return result;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        internal static void TryRefreshView(cSapModel model)
+        {
+            if (model == null)
+            {
+                return;
+            }
+
+            try
+            {
+                model.View.RefreshView(0, false);
+            }
+            catch
+            {
+                // ignored
+            }
+        }
+
+        internal static string FormatLoadPatternSummary(IReadOnlyList<string> filters)
+        {
+            if (filters == null || filters.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            if (filters.Count == 1)
+            {
+                return $"load pattern \"{filters[0]}\"";
+            }
+
+            return $"load patterns ({string.Join(", ", filters)})";
+        }
     }
 }

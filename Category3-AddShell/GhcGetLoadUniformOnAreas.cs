@@ -32,6 +32,7 @@ using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
 using ETABSv1;
+using static MGT.ComponentShared;
 
 namespace MGT
 {
@@ -126,11 +127,11 @@ namespace MGT
 
             try
             {
-                List<string> trimmed = ComponentShared.NormalizeDistinct(areaNames);
+                List<string> trimmed = NormalizeDistinct(areaNames);
 
                 var rawResult = GetAreaUniform(sapModel, trimmed);
 
-                List<string> trimmedFilters = ComponentShared.NormalizeDistinct(loadPatternFilters);
+                List<string> trimmedFilters = NormalizeDistinct(loadPatternFilters);
                 bool hasFilters = trimmedFilters.Count > 0;
                 var result = FilterByLoadPattern(rawResult, trimmedFilters);
 
@@ -262,7 +263,7 @@ namespace MGT
                 {
                     string resolvedAreaName = areaName[i];
                     int direction = dir[i];
-                    string resolvedCoordinate = ComponentShared.ResolveDirectionReferenceArea(direction);
+                    string resolvedCoordinate = ResolveDirectionReferenceArea(direction);
 
                     areaNameOut.Add(resolvedAreaName);
                     loadPatOut.Add(loadPat[i]);
@@ -365,21 +366,6 @@ namespace MGT
             }
 
             return (areaNameOut.Count, result.failCount, areaNameOut, loadPatOut, cSysOut, dirOut, valueOut);
-        }
-
-        private static string FormatLoadPatternSummary(IReadOnlyList<string> filters)
-        {
-            if (filters == null || filters.Count == 0)
-            {
-                return string.Empty;
-            }
-
-            if (filters.Count == 1)
-            {
-                return $"load pattern \"{filters[0]}\"";
-            }
-
-            return $"load patterns ({string.Join(", ", filters)})";
         }
 
         private void UpdateAndPushOutputs(
