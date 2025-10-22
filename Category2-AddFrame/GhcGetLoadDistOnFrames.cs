@@ -1,10 +1,10 @@
 ﻿// -------------------------------------------------------------
-// Component : Get Frame Distributed Loads (per-object query)
+// Component : Get Frame Distributed Loads (Auto Refresh)
 // Author    : Anh Bui
 // Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
 // Depends   : Grasshopper, ETABSv1 (COM)  [Embed Interop Types = False]
 // Panel     : "MGT" / "2.0 Frame Object Modelling"
-// GUID      : a1cfe4a7-9d49-42eb-aac9-774cdd7d1e84
+// GUID      : f5c5b1db-a90c-4f1f-9d5f-3f5b3be3c35e
 // -------------------------------------------------------------
 // Inputs (ordered):
 //   0) sapModel    (ETABSv1.cSapModel, item)  ETABS model from your Attach component.
@@ -39,8 +39,6 @@ namespace MGT
 {
     public class GhcGetLoadDistOnFrames : GH_Component
     {
-        private const string IdleMessage = "Idle.";
-
         private static readonly string[] HeaderLabels =
         {
             "FrameName",
@@ -56,22 +54,17 @@ namespace MGT
             "Value2"
         };
 
-        private bool lastRun;
-        private GH_Structure<GH_String> lastHeaderTree = BuildHeaderTree();
-        private GH_Structure<GH_ObjectWrapper> lastValueTree = new GH_Structure<GH_ObjectWrapper>();
-        private string lastMessage = IdleMessage;
-
         public GhcGetLoadDistOnFrames()
           : base(
-                "Get Frame Distributed Loads",
+                "Get Frame Distributed Loads (Auto)",
                 "GetFrameDistLoads",
-                "Query distributed loads assigned to ETABS frame objects (per object mode).\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
+                "Query distributed loads assigned to ETABS frame objects (per object mode). Automatically refreshes without a run button.\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                 "MGT",
                 "2.0 Frame Object Modelling")
         {
         }
 
-        public override Guid ComponentGuid => new Guid("a1cfe4a7-9d49-42eb-aac9-774cdd7d1e84");
+        public override Guid ComponentGuid => new Guid("f5c5b1db-a90c-4f1f-9d5f-3f5b3be3c35e");
         protected override Bitmap Icon
         {
             get
@@ -87,7 +80,6 @@ namespace MGT
 
         protected override void RegisterInputParams(GH_InputParamManager p)
         {
-            p.AddBooleanParameter("run", "run", "Press to query (rising edge trigger).", GH_ParamAccess.item, false);
             p.AddGenericParameter("sapModel", "sapModel", "ETABS cSapModel from the Attach component.", GH_ParamAccess.item);
             int frameNameIndex = p.AddTextParameter(
                 "frameNames",
@@ -113,32 +105,19 @@ namespace MGT
 
         protected override void SolveInstance(IGH_DataAccess da)
         {
-            bool run = false;
             cSapModel sapModel = null;
             List<string> frameNames = new List<string>();
             List<string> loadPatternFilters = new List<string>();
 
-            da.GetData(0, ref run);
-            da.GetData(1, ref sapModel);
-            da.GetDataList(2, frameNames);
-            da.GetDataList(3, loadPatternFilters);
-
-            bool rising = !lastRun && run;
-
-            if (!rising)
-            {
-                da.SetDataTree(0, lastHeaderTree.Duplicate());
-                da.SetDataTree(1, lastValueTree.Duplicate());
-                da.SetData(2, lastMessage);
-                lastRun = run;
-                return;
-            }
+            da.GetData(0, ref sapModel);
+            da.GetDataList(1, frameNames);
+            da.GetDataList(2, loadPatternFilters);
 
             if (sapModel == null)
             {
                 string warning = "sapModel is null. Wire it from the Attach component.";
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, warning);
-                UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), warning, run);
+                UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), warning);
                 return;
             }
 
@@ -185,7 +164,7 @@ namespace MGT
                         ? "No frame objects exist in the model."
                         : "No valid frame names provided.";
 
-                    UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), noFramesMessage, run);
+                    UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), noFramesMessage);
                     return;
                 }
 
@@ -268,13 +247,13 @@ namespace MGT
                         : $"Returned {result.total} distributed loads on {positiveTarget}.";
                 }
 
-                UpdateAndPushOutputs(da, headerTree, valueTree, status, run);
+                UpdateAndPushOutputs(da, headerTree, valueTree, status);
             }
             catch (Exception ex)
             {
                 string errorMessage = "Error: " + ex.Message;
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Error, ex.Message);
-                UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), errorMessage, run);
+                UpdateAndPushOutputs(da, BuildHeaderTree(), new GH_Structure<GH_ObjectWrapper>(), errorMessage);
             }
         }
 
@@ -780,17 +759,11 @@ namespace MGT
         }
 
         private void UpdateAndPushOutputs(IGH_DataAccess da, GH_Structure<GH_String> headerTree, GH_Structure<GH_ObjectWrapper> valueTree,
-            string message, bool currentRunState)
+            string message)
         {
-            lastHeaderTree = headerTree.Duplicate();
-            lastValueTree = valueTree.Duplicate();
-            lastMessage = message;
-
             da.SetDataTree(0, headerTree);
             da.SetDataTree(1, valueTree);
             da.SetData(2, message);
-
-            lastRun = currentRunState;
         }
     }
 }

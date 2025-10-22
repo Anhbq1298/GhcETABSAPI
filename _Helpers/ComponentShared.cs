@@ -93,7 +93,7 @@ namespace MGT
 
         internal static string ResolveDirectionReference(int direction)
         {
-            return Math.Abs(direction) < 10 ? "Local" : "Global";
+            return Math.Abs(direction) < 4 ? "Local" : "Global";
         }
 
         internal static bool IsInvalidNumber(double value)

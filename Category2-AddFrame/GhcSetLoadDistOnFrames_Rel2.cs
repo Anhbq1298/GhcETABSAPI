@@ -25,7 +25,7 @@
 //   • Distances are clamped to [0,1]; swapped when start > end.
 //   • Any row with missing/invalid core data is reported as "skipped".
 //   • When run is false or not toggled, the component replays the last output messages/tree.
-//   • After processing, schedules GhcGetLoadDistOnFrames2 components in the document to refresh.
+//   • After processing, schedules GhcGetLoadDistOnFrames components in the document to refresh.
 // -------------------------------------------------------------
 
 using System;
@@ -297,10 +297,10 @@ namespace MGT
                     return 0;
                 }
 
-                List<GhcGetLoadDistOnFrames2> targets = new List<GhcGetLoadDistOnFrames2>();
+                List<GhcGetLoadDistOnFrames> targets = new List<GhcGetLoadDistOnFrames>();
                 foreach (IGH_DocumentObject obj in document.Objects)
                 {
-                    if (obj is GhcGetLoadDistOnFrames2 getComponent &&
+                    if (obj is GhcGetLoadDistOnFrames getComponent &&
                         ReferenceEquals(getComponent.OnPingDocument(), document) &&
                         !getComponent.Locked &&
                         !getComponent.Hidden)
@@ -316,7 +316,7 @@ namespace MGT
 
                 document.ScheduleSolution(5, _ =>
                 {
-                    foreach (GhcGetLoadDistOnFrames2 target in targets)
+                    foreach (GhcGetLoadDistOnFrames target in targets)
                     {
                         if (!target.Locked && !target.Hidden)
                         {
