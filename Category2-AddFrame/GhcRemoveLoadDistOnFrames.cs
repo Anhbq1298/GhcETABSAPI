@@ -389,11 +389,6 @@ namespace MGT
             return $"load patterns ({string.Join(", ", filters)})";
         }
 
-        private static string Plural(int count, string word)
-        {
-            return count == 1 ? $"{count} {word}" : $"{count} {word}s";
-        }
-
         private static string SafeArrayValue(string[] source, int index)
         {
             if (source == null || index < 0 || index >= source.Length)
