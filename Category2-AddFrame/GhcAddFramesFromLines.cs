@@ -223,6 +223,51 @@ namespace MGT
             da.SetData(0, msg);
             lastMsg = msg;
             lastAdd = add;
+            TriggerGetAllFrameInfoRefresh();
+        }
+
+        private void TriggerGetAllFrameInfoRefresh()
+        {
+            try
+            {
+                GH_Document document = OnPingDocument();
+                if (document == null)
+                {
+                    return;
+                }
+
+                List<GhcGetAllFrameInfo> targets = new List<GhcGetAllFrameInfo>();
+                foreach (IGH_DocumentObject obj in document.Objects)
+                {
+                    if (obj is GhcGetAllFrameInfo target &&
+                        ReferenceEquals(target.OnPingDocument(), document) &&
+                        !target.Locked &&
+                        !target.Hidden)
+                    {
+                        targets.Add(target);
+                    }
+                }
+
+                if (targets.Count == 0)
+                {
+                    return;
+                }
+
+                document.ScheduleSolution(5, _ =>
+                {
+                    foreach (GhcGetAllFrameInfo target in targets)
+                    {
+                        if (!target.Locked && !target.Hidden)
+                        {
+                            target.ExpireSolution(false);
+                        }
+                    }
+                });
+            }
+            catch
+            {
+                // Swallow exceptions to avoid interrupting the main solve.
+            }
         }
     }
 }

@@ -184,6 +184,7 @@ namespace MGT
 
             da.SetData(0, _lastMsg);
             _lastAdd = add;
+            TriggerGetAllFrameInfoRefresh();
 
             if (!string.IsNullOrEmpty(notification))
             {
@@ -195,6 +196,50 @@ namespace MGT
                 {
                     // Swallow any exception from UI notifications to avoid breaking SolveInstance.
                 }
+            }
+        }
+
+        private void TriggerGetAllFrameInfoRefresh()
+        {
+            try
+            {
+                GH_Document document = OnPingDocument();
+                if (document == null)
+                {
+                    return;
+                }
+
+                List<GhcGetAllFrameInfo> targets = new List<GhcGetAllFrameInfo>();
+                foreach (IGH_DocumentObject obj in document.Objects)
+                {
+                    if (obj is GhcGetAllFrameInfo target &&
+                        ReferenceEquals(target.OnPingDocument(), document) &&
+                        !target.Locked &&
+                        !target.Hidden)
+                    {
+                        targets.Add(target);
+                    }
+                }
+
+                if (targets.Count == 0)
+                {
+                    return;
+                }
+
+                document.ScheduleSolution(5, _ =>
+                {
+                    foreach (GhcGetAllFrameInfo target in targets)
+                    {
+                        if (!target.Locked && !target.Hidden)
+                        {
+                            target.ExpireSolution(false);
+                        }
+                    }
+                });
+            }
+            catch
+            {
+                // Ignore scheduling issues to keep SolveInstance robust.
             }
         }
     }
