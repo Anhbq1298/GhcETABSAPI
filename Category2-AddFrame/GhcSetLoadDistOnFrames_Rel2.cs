@@ -25,6 +25,7 @@
 //   • Distances are clamped to [0,1]; swapped when start > end.
 //   • Any row with missing/invalid core data is reported as "skipped".
 //   • When run is false or not toggled, the component replays the last output messages/tree.
+//   • After processing, schedules GhcGetLoadDistOnFrames2 components in the document to refresh.
 // -------------------------------------------------------------
 
 using System;
@@ -113,6 +114,8 @@ namespace MGT
             List<string> messages = new List<string>();
             GH_Structure<GH_ObjectWrapper> valueTree = new GH_Structure<GH_ObjectWrapper>();
 
+            int scheduledRefreshCount = 0;
+
             try
             {
                 if (sapModel == null)
@@ -153,6 +156,7 @@ namespace MGT
                     valueTree = BuildValueTree(excelData);
                     messages.Add($"Read 0 data rows from sheet '{sheetName}'. Nothing to assign.");
                     UiHelpers.CloseProgressBar();
+                    scheduledRefreshCount = TriggerGetComponentRefresh();
                 }
                 else
                 {
@@ -258,6 +262,8 @@ namespace MGT
                     {
                         // ignored
                     }
+
+                    scheduledRefreshCount = TriggerGetComponentRefresh();
                 }
             }
             catch (Exception ex)
@@ -267,6 +273,11 @@ namespace MGT
 
             UiHelpers.CloseProgressBar();
 
+            if (scheduledRefreshCount > 0)
+            {
+                messages.Add($"Scheduled refresh for {Plural(scheduledRefreshCount, "Get Frame Distributed Loads component")}.");
+            }
+
             da.SetDataTree(0, valueTree);
             da.SetDataList(1, messages.ToArray());
 
@@ -274,6 +285,52 @@ namespace MGT
             _lastMessages.Clear();
             _lastMessages.AddRange(messages);
             _lastRun = run;
+        }
+
+        private int TriggerGetComponentRefresh()
+        {
+            try
+            {
+                GH_Document document = OnPingDocument();
+                if (document == null)
+                {
+                    return 0;
+                }
+
+                List<GhcGetLoadDistOnFrames2> targets = new List<GhcGetLoadDistOnFrames2>();
+                foreach (IGH_DocumentObject obj in document.Objects)
+                {
+                    if (obj is GhcGetLoadDistOnFrames2 getComponent &&
+                        ReferenceEquals(getComponent.OnPingDocument(), document) &&
+                        !getComponent.Locked &&
+                        !getComponent.Hidden)
+                    {
+                        targets.Add(getComponent);
+                    }
+                }
+
+                if (targets.Count == 0)
+                {
+                    return 0;
+                }
+
+                document.ScheduleSolution(5, _ =>
+                {
+                    foreach (GhcGetLoadDistOnFrames2 target in targets)
+                    {
+                        if (!target.Locked && !target.Hidden)
+                        {
+                            target.ExpireSolution(false);
+                        }
+                    }
+                });
+
+                return targets.Count;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private static List<PreparedLoadAssignment> PrepareLoadAssignments(
