@@ -35,10 +35,10 @@ using ETABSv1;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
-using static GhcETABSAPI.ComponentShared;
+using static MGT.ComponentShared;
 using Excel = Microsoft.Office.Interop.Excel;
 
-namespace GhcETABSAPI
+namespace MGT
 {
     public class GhcSetLoadUniformOnAreas2 : GH_Component
     {

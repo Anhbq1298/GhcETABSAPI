@@ -10,7 +10,7 @@ using System.Threading;
 using Excel = Microsoft.Office.Interop.Excel;
 using Microsoft.VisualBasic;
 
-namespace GhcETABSAPI
+namespace MGT
 {
     internal class ExcelHelpers
     {

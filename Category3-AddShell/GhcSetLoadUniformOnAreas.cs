@@ -25,7 +25,7 @@ using System.Text;
 using Grasshopper.Kernel;
 using ETABSv1;
 
-namespace GhcETABSAPI
+namespace MGT
 {
     public class GhcSetLoadUniformOnAreas : GH_Component
     {

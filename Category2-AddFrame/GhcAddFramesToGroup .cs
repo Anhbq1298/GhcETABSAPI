@@ -30,7 +30,7 @@ using System.Drawing;
 using Grasshopper.Kernel;
 using ETABSv1;
 
-namespace GhcETABSAPI
+namespace MGT
 {
     public class GhcAddFramesToGroup : GH_Component
     {

@@ -33,7 +33,7 @@ using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
 using ETABSv1;
 
-namespace GhcETABSAPI
+namespace MGT
 {
     public class GhcGetLoadDistOnFrames : GH_Component
     {

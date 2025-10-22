@@ -16,9 +16,9 @@
   <PropertyGroup>
     <!-- Specifies information for Assembly and Yak -->
     <Version>1.0</Version>
-    <Title>GhcETABSAPI</Title>
-    <Company>GhcETABSAPI Authors</Company>
-    <Description>Description of GhcETABSAPI</Description>
+    <Title>MGT</Title>
+    <Company>Meinhardt</Company>
+    <Description>Meinhardt Grasshopper Tool</Description>
     <ProduceReferenceAssembly>True</ProduceReferenceAssembly>
   </PropertyGroup>
   

@@ -38,7 +38,7 @@ using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
 using Excel = Microsoft.Office.Interop.Excel;
 
-namespace GhcETABSAPI
+namespace MGT
 {
     public class GhcWriteGHTreeToExcel : GH_Component
     {
