@@ -31,7 +31,7 @@ using Grasshopper.Kernel;
 using ETABSv1;
 using System.Windows.Forms;
 
-namespace GhcETABSAPI
+namespace MGT
 {
     public class GhcAssignFrameSection : GH_Component
     {

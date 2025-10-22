@@ -36,9 +36,9 @@ using System.Collections.Generic;
 using System.Drawing;
 using ETABSv1;
 using Grasshopper.Kernel;
-using static GhcETABSAPI.ComponentShared;
+using static MGT.ComponentShared;
 
-namespace GhcETABSAPI
+namespace MGT
 {
     public class GhcSetLoadDistOnFrames_Rel : GH_Component
     {

@@ -1,6 +1,6 @@
-# GhcETABSAPI
+# MGT
 
-GhcETABSAPI is a Grasshopper plug-in that wraps parts of the ETABS API so Rhino users can automate model setup, unit management, and Excel handoffs without leaving the Rhino/Grasshopper environment.
+MGT (Meinhardt Grasshopper Tool) is a Grasshopper plug-in that wraps parts of the ETABS API so Rhino users can automate model setup, unit management, and Excel handoffs without leaving the Rhino/Grasshopper environment.
 
 ## Project structure
 
@@ -18,7 +18,7 @@ The solution is organised as Grasshopper component categories that mirror the ta
 
 ## Build requirements
 
-- Targets .NET Framework 4.8 and produces a `.gha` assembly (`GhcETABSAPI.csproj`).
+- Targets .NET Framework 4.8 and produces a `.gha` assembly (`MGT.csproj`).
 - References Grasshopper 8.0 and the ETABS COM interop (`ETABSv1.dll`).
 - Uses Microsoft Office Excel interop with embedded COM types for deployment.
 

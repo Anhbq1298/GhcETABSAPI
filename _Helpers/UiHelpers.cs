@@ -3,7 +3,7 @@ using System.Drawing;
 using System.Windows.Forms;
 using Grasshopper;
 
-namespace GhcETABSAPI
+namespace MGT
 {
     internal static class UiHelpers
     {

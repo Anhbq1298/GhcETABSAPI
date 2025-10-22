@@ -3,17 +3,17 @@ using System.Drawing;
 using Grasshopper;
 using Grasshopper.Kernel;
 
-namespace GhcETABSAPI
+namespace MGT
 {
-    public class GhcETABSAPIInfo : GH_AssemblyInfo
+    public class MGTInfo : GH_AssemblyInfo
     {
-        public override string Name => "GhcETABSAPI";
+        public override string Name => "MGT";
 
         //Return a 24x24 pixel bitmap to represent this GHA library.
         public override Bitmap Icon => null;
 
         //Return a short string describing the purpose of this GHA library.
-        public override string Description => "";
+        public override string Description => "Meinhardt Grasshopper Tool";
 
         public override Guid Id => new Guid("ac55d3ed-5221-4c35-b9d5-762b9208e5d6");
 

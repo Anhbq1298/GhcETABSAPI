@@ -24,7 +24,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using Grasshopper.Kernel;
 
-namespace GhcETABSAPI
+namespace MGT
 {
     public class GhcUnitScaleFactor : GH_Component
     {

@@ -22,7 +22,7 @@ using System.Drawing;
 using Grasshopper.Kernel;
 using Rhino;
 
-namespace GhcETABSAPI
+namespace MGT
 {
     public class GhcGetRhinoUnits : GH_Component
     {

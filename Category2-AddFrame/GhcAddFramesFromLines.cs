@@ -35,7 +35,7 @@ using Grasshopper.Kernel;
 using Rhino.Geometry;
 using ETABSv1;
 
-namespace GhcETABSAPI
+namespace MGT
 {
     public class GhcAddFramesToETABS : GH_Component
     {
