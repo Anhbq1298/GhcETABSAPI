@@ -438,7 +438,7 @@ namespace GhcETABSAPI
 
         private static string ResolveDirectionReference(int direction)
         {
-            return Math.Abs(direction) < 10 ? "Local" : "Global";
+            return Math.Abs(direction) < 4 ? "Local" : "Global";
         }
 
         private static (int total, int failCount, List<string> frameName, List<string> loadPat, List<int> myType, List<string> cSys,
