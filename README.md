@@ -1,32 +1,80 @@
-# MGT
+# MGT – Meinhardt Grasshopper Tool
 
-MGT (Meinhardt Grasshopper Tool) is a Grasshopper plug-in that wraps parts of the ETABS API so Rhino users can automate model setup, unit management, and Excel handoffs without leaving the Rhino/Grasshopper environment.
+MGT is a Grasshopper plug-in that wraps key pieces of the ETABS API so structural engineers can automate common modelling and
+documentation workflows without leaving the Rhino/Grasshopper environment. The plug-in focuses on bridging ETABS model data
+with Rhino geometry and Excel-based handover documents to streamline multidisciplinary coordination.
 
-## Project structure
+## Key capabilities
+
+- **Attach to ETABS sessions** – connect to an existing ETABS model or spin up a new instance directly from Grasshopper.
+- **Synchronise units** – read the active units from both ETABS and Rhino so geometric inputs stay consistent.
+- **Author frame and shell elements** – generate beams, columns, braces, and shell meshes from Rhino curves and polylines.
+- **Manage metadata** – assign section properties, groups, and loads as part of the element creation process.
+- **Export data to Excel** – capture Grasshopper data trees in Excel spreadsheets for downstream coordination.
+
+## Repository layout
 
 The solution is organised as Grasshopper component categories that mirror the tabs visible inside Grasshopper:
 
-- `Category0-Utility/GhcWriteGHTreeToExcel.cs` – exports a Grasshopper data tree to Excel using `ExcelHelpers` for COM handling.
-- `Category1-IO/` – connection and unit utilities including:
-  - `GhcAttachETABSInstance.cs` – attaches to an ETABS session.
-  - `GhcGetETABSUnits.cs` and `GhcGetRhinoUnits.cs` – report active unit systems.
-  - `GhcUnitScaleFactor .cs` – computes length conversion factors.
-- `Category2-AddFrame/` – frame element tools such as section assignment, creation from Rhino curves, grouping, and load extraction.
-- `Category3-AddShell/GhcAddShellsFromPolylines.cs` – creates ETABS shell elements from Grasshopper geometry.
-- `ExcelHelpers.cs` – shared Excel automation helpers used by export components.
-- `Resources/` – embedded icons referenced by the Grasshopper components.
+| Folder | Purpose |
+| --- | --- |
+| `Category0-Utility/` | Helper utilities including `GhcWriteGHTreeToExcel` that serialises Grasshopper trees into Excel using COM interop. |
+| `Category1-IO/` | Connection and unit utilities (`GhcAttachETABSInstance`, `GhcGetETABSUnits`, `GhcGetRhinoUnits`, `GhcUnitScaleFactor`). |
+| `Category2-AddFrame/` | Frame element authoring components: create members from Rhino curves, assign sections, group elements, and extract loads. |
+| `Category3-AddShell/` | Shell element tools, notably `GhcAddShellsFromPolylines` for creating ETABS shell elements from planar polylines. |
+| `_Helpers/ExcelHelpers.cs` | Shared Excel automation helpers used by export components. |
+| `Resources/` | Embedded icons referenced by the Grasshopper components. |
+
+Additional top-level files include the Visual Studio solution (`MGT.sln`), the class library project (`MGT.csproj`), and the ETABS
+interop assembly (`ETABSv1.dll`).
 
 ## Build requirements
 
-- Targets .NET Framework 4.8 and produces a `.gha` assembly (`MGT.csproj`).
-- References Grasshopper 8.0 and the ETABS COM interop (`ETABSv1.dll`).
-- Uses Microsoft Office Excel interop with embedded COM types for deployment.
+- Targets **.NET Framework 4.8**.
+- References **Grasshopper 8.0** assemblies.
+- Uses the **ETABS COM interop** (`ETABSv1.dll`) for API access.
+- Relies on **Microsoft Office Excel Interop** with embedded COM types for deployment without requiring local Excel installation.
+
+## Building the plug-in
+
+1. Open `MGT.sln` in Visual Studio 2022 (or newer) with the .NET desktop development workload.
+2. Restore any missing references:
+   - `Grasshopper.dll` (installed with Rhino/Grasshopper).
+   - `ETABSv1.dll` (bundled in the repository).
+3. Build the `MGT` project in **Release** mode to produce the `MGT.gha` assembly.
 
 ## Post-build deployment
 
-The `PostBuild` target copies the compiled `.gha` and any ETABS interop DLLs into the user's Grasshopper libraries folder so Rhino can discover the plug-in automatically.
+The project includes a `PostBuild` target that copies the compiled `.gha` and supporting ETABS interop DLLs into the current
+user's Grasshopper libraries folder. This allows Rhino to discover the plug-in automatically the next time Grasshopper is opened.
+If the automatic copy fails, manually place the contents of the `bin/Release` folder into `%AppData%\Grasshopper\Libraries`.
 
-## Development tips
+## Using the components
 
-- When running outside of Rhino, ensure the Microsoft Office Excel interop is available locally so the Excel helper functions succeed.
+1. Launch Rhino and open Grasshopper.
+2. Locate the **MGT** tab within Grasshopper's component ribbon.
+3. Drag the desired component onto the canvas:
+   - Start with the IO components to attach to ETABS and synchronise units.
+   - Use the Add Frame/Shell components to author geometry-driven ETABS elements.
+   - Leverage the Utility components to export Grasshopper data trees to Excel for reporting.
+4. Monitor the Rhino command line for status messages while the components interact with ETABS or Excel.
+
+## Development guidelines
+
 - Keep new components within the existing category folders so the Grasshopper UI remains organised.
+- Follow Grasshopper naming conventions: prefix component classes with `Ghc` and provide clear `Category` and `SubCategory` values.
+- Reuse helpers in `_Helpers` for common COM/interop logic to avoid duplicate boilerplate.
+- When running outside of Rhino, ensure the Microsoft Office Excel interop is installed locally so the Excel helper functions succeed.
+
+## Troubleshooting
+
+- **Cannot attach to ETABS:** Verify ETABS is running or that the ETABS interop is registered. Launch ETABS manually before using the attach component.
+- **Missing references during build:** Confirm that Rhino/Grasshopper is installed and the `Grasshopper.dll` path is correct. Re-add the reference if needed.
+- **Excel export failures:** Ensure Excel (or the necessary interop assemblies) is installed and accessible. Running Visual Studio as administrator can resolve COM permission issues.
+
+## Further resources
+
+- [ETABS API documentation](https://docs.csiamerica.com) – official API reference from Computers and Structures, Inc.
+- [Grasshopper developer guides](https://developer.rhino3d.com/guides/grasshopper/) – tips for authoring custom components.
+- [RhinoCommon SDK](https://developer.rhino3d.com/api/) – underlying Rhino APIs used by Grasshopper components.
+
