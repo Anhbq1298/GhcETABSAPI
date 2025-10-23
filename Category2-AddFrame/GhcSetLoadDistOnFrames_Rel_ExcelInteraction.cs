@@ -7,7 +7,7 @@
 // -------------------------------------------------------------
 // Class diagram (simplified)
 //   +--------------------------------------------+
-//   | GhcSetLoadDistOnFrames_Rel3                |
+//   | GhcSetLoadDistOnFrames_Rel_ExcelInteraction|
 //   +--------------------------------------------+
 //   | - _lastRun : bool                          |
 //   | - _lastValues : GH_Structure<GH_ObjectWrapper>
@@ -63,14 +63,14 @@ using Excel = Microsoft.Office.Interop.Excel;
 
 namespace MGT
 {
-    public class GhcSetLoadDistOnFrames_Rel3 : GH_Component
+    public class GhcSetLoadDistOnFrames_Rel_ExcelInteraction : GH_Component
     {
         private bool _lastRun;
         private GH_Structure<GH_ObjectWrapper> _lastValues = new GH_Structure<GH_ObjectWrapper>();
         private readonly List<string> _lastMessages = new List<string> { "No previous run. Toggle 'run' to assign." };
         private readonly List<string> _lastRemoved = new List<string>();
 
-        public GhcSetLoadDistOnFrames_Rel3()
+        public GhcSetLoadDistOnFrames_Rel_ExcelInteraction()
           : base(
                 "Set Frame Distributed Loads (Rel, Excel Diff)",
                 "SetFrameUDLRelDiff",
