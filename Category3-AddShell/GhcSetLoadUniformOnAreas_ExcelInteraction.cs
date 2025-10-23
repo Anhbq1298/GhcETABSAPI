@@ -849,6 +849,18 @@ namespace MGT
             return combos;
         }
 
+        private class ExcelLoadData
+        {
+            public List<string> Headers { get; } = new List<string>();
+            public List<string> AreaName { get; } = new List<string>();
+            public List<string> LoadPattern { get; } = new List<string>();
+            public List<string> CoordinateSystem { get; } = new List<string>();
+            public List<int?> Direction { get; } = new List<int?>();
+            public List<double?> Value { get; } = new List<double?>();
+
+            public int RowCount => AreaName.Count;
+        }
+
         private static HashSet<AreaPatternKey> CollectCombosFromValueTree(GH_Structure<IGH_Goo> tree)
         {
             HashSet<AreaPatternKey> combos = new HashSet<AreaPatternKey>();
