@@ -9,13 +9,13 @@
 //
 // INPUTS (ordered exactly as shown on the component):
 //   0) add            (bool, item)  Rising-edge trigger. Runs when it goes False→True.
-//   1) tree           (generic, tree) Data tree to export. Each GH_Path becomes an Excel column.
-//   2) path           (string, item) Workbook path (relative → plugin directory). Default "TreeExport.xlsx".
-//   3) ws             (string, item) Worksheet name. Created if missing. Default "Sheet1".
-//   4) address        (string, item) Starting Excel address (e.g., "A1"). Defaults to "A1".
-//   5) excelOptions   (bool, list)  Optional list: [0]=visible (default true), [1]=saveAfterWrite (default true),
+//   1) path           (string, item) Workbook path (relative → plugin directory). Default "TreeExport.xlsx".
+//   2) sheetName      (string, item) Worksheet name. Created if missing. Default "Sheet1".
+//   3) address        (string, item) Starting Excel address (e.g., "A1"). Defaults to "A1".
+//   4) excelOptions   (bool, list)  Optional list: [0]=visible (default true), [1]=saveAfterWrite (default true),
 //                                 [2]=readOnly (default false).
-//   6) headers        (string, list) Optional column headers; blanks auto-fill ("Header", "Header_1", ...).
+//   5) headers        (string, list) Optional column headers; blanks auto-fill ("Header", "Header_1", ...).
+//   6) tree           (generic, tree) Data tree to export. Each GH_Path becomes an Excel column.
 //
 // OUTPUTS:
 //   0) msg            (string, item) Status message (replayed while idle).
@@ -74,7 +74,6 @@ namespace MGT
         protected override void RegisterInputParams(GH_InputParamManager p)
         {
             p.AddBooleanParameter("add", "add", "Press to run once (rising edge).", GH_ParamAccess.item, false);
-            p.AddGenericParameter("tree", "tree", "Data tree to export. Each branch becomes an Excel column.", GH_ParamAccess.tree);
 
             // path: null/empty => dùng template; nếu cung cấp thì PHẢI là absolute .xlsx
             int pathIndex = p.AddTextParameter(
@@ -83,7 +82,7 @@ namespace MGT
                 GH_ParamAccess.item, string.Empty);
             p[pathIndex].Optional = true;
 
-            p.AddTextParameter("ws", "ws", "Worksheet name. Created if missing.", GH_ParamAccess.item, "Sheet1");
+            p.AddTextParameter("sheetName", "sheet", "Worksheet name. Created if missing.", GH_ParamAccess.item, "Sheet1");
             p.AddTextParameter("address", "address", "Starting Excel cell address (e.g., A1).", GH_ParamAccess.item, "A1");
 
             int optionsIndex = p.AddBooleanParameter(
@@ -97,6 +96,8 @@ namespace MGT
                 "Optional header labels. If empty, branch paths are used.",
                 GH_ParamAccess.list);
             p[headerIndex].Optional = true;
+
+            p.AddGenericParameter("tree", "tree", "Data tree to export. Each branch becomes an Excel column.", GH_ParamAccess.tree);
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager p)
@@ -119,7 +120,7 @@ namespace MGT
 
             GH_Structure<IGH_Goo> tree = null;
             string workbookPath = null;
-            string worksheetName = "Sheet1";
+            string sheetName = "Sheet1";
             string address = "A1";
             bool visible = true;
             bool saveAfterWrite = true;
@@ -128,12 +129,12 @@ namespace MGT
             var headerOverrides = new List<string>();
             string message;
 
-            da.GetDataTree(1, out tree);
-            da.GetData(2, ref workbookPath);
-            da.GetData(3, ref worksheetName);
-            da.GetData(4, ref address);
-            da.GetDataList(5, excelOptions);
-            da.GetDataList(6, headerOverrides);
+            da.GetData(1, ref workbookPath);
+            da.GetData(2, ref sheetName);
+            da.GetData(3, ref address);
+            da.GetDataList(4, excelOptions);
+            da.GetDataList(5, headerOverrides);
+            da.GetDataTree(6, out tree);
 
             if (excelOptions != null)
             {
@@ -176,7 +177,7 @@ namespace MGT
                 headers,
                 columnKeys,
                 wb,                 // reuse existing workbook
-                worksheetName,      // create if missing
+                sheetName,          // create if missing
                 startRow,
                 startColumn,
                 address,            // for message text only
