@@ -7,7 +7,7 @@
 // -------------------------------------------------------------
 // Class diagram (simplified)
 //   +--------------------------------------------+
-//   | GhcSetLoadUniformOnAreas3                  |
+//   | GhcSetLoadUniformOnAreas_ExcelInteraction  |
 //   +--------------------------------------------+
 //   | - _lastRun : bool                          |
 //   | - _lastValues : GH_Structure<GH_ObjectWrapper>
@@ -62,7 +62,7 @@ using Excel = Microsoft.Office.Interop.Excel;
 
 namespace MGT
 {
-    public class GhcSetLoadUniformOnAreas3 : GH_Component
+    public class GhcSetLoadUniformOnAreas_ExcelInteraction : GH_Component
     {
         private const string DefaultSheetName = "Assigned Loads On Areas";
 
@@ -71,7 +71,7 @@ namespace MGT
         private readonly List<string> _lastMessages = new List<string> { "No previous run. Toggle 'run' to assign." };
         private readonly List<string> _lastRemoved = new List<string>();
 
-        public GhcSetLoadUniformOnAreas3()
+        public GhcSetLoadUniformOnAreas_ExcelInteraction()
           : base(
                 "Set Load Uniform On Areas (Excel Diff)",
                 "AreaUDLDiff",
