@@ -44,7 +44,10 @@
 			<Private>true</Private>
 			<!-- ensure it is copied to output -->
 		</Reference>
-        </ItemGroup>
+		<!-- Remove these if unused -->
+		<Reference Include="Microsoft.CSharp" />
+		<Reference Include="Microsoft.VisualBasic" />
+	</ItemGroup>
 
 	<!-- Resources -->
 	<ItemGroup>

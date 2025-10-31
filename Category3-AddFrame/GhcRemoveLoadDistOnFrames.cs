@@ -183,6 +183,8 @@ namespace MGT
                         continue;
                     }
 
+                    bool anyTargetOnFrame = false;
+
                     HashSet<string> processedPatterns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                     foreach (DistributedLoadEntry entry in loadResult.entries)
@@ -199,6 +201,7 @@ namespace MGT
                             continue;
                         }
 
+                        anyTargetOnFrame = true;
                         targetedLoads++;
 
                         if (TryDeleteLoad(sapModel, frameName, entryPattern))
