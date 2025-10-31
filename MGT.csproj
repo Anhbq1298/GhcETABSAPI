@@ -1,85 +1,92 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	
-  <PropertyGroup>
-    <!-- Select the framework(s) you wish to target.
-        Rhino 7: net48
-        Rhino 8 net48
-        
-    -->
-    <TargetFrameworks>net48</TargetFrameworks>
-    <EnableDynamicLoading>true</EnableDynamicLoading>
-    <TargetExt>.gha</TargetExt>
-    <NoWarn>NU1701;NETSDK1086</NoWarn>
-    <EnableWindowsTargeting>true</EnableWindowsTargeting>
-  </PropertyGroup>
-  
-  <PropertyGroup>
-    <!-- Specifies information for Assembly and Yak -->
-    <Version>1.0</Version>
-    <Title>MGT</Title>
-    <Company>Meinhardt</Company>
-    <Description>Meinhardt Grasshopper Tool</Description>
-    <ProduceReferenceAssembly>True</ProduceReferenceAssembly>
-  </PropertyGroup>
-  
-  <ItemGroup>
-    <COMReference Include="Microsoft.Office.Interop.Excel">
-      <WrapperTool>tlbimp</WrapperTool>
-      <VersionMinor>9</VersionMinor>
-      <VersionMajor>1</VersionMajor>
-      <Guid>00020813-0000-0000-c000-000000000046</Guid>
-      <Lcid>0</Lcid>
-      <Isolated>false</Isolated>
-      <EmbedInteropTypes>True</EmbedInteropTypes>
-    </COMReference>
-  </ItemGroup>
-  
-  <ItemGroup>
-	  <PackageReference Include="Grasshopper" Version="8.0.23304.9001" ExcludeAssets="runtime" />
-  </ItemGroup>
-  
-  <!-- For Windows only builds -->
-  <PropertyGroup Condition="$(TargetFramework.Contains('-windows')) or $(TargetFramework.StartsWith('net4'))">
-    <UseWindowsForms>true</UseWindowsForms>
-  </PropertyGroup>
+	<PropertyGroup>
+		<!-- Rhino 8 on Windows, .NET 8 -->
+		<TargetFramework>net8.0-windows</TargetFramework>
+		<TargetExt>.gha</TargetExt>
+		<EnableDynamicLoading>true</EnableDynamicLoading>
+		<EnableWindowsTargeting>true</EnableWindowsTargeting>
+		<UseWindowsForms>true</UseWindowsForms>
+		<PlatformTarget>x64</PlatformTarget>
+		<Prefer32Bit>false</Prefer32Bit>
+		<NoWarn>NU1701;NETSDK1086</NoWarn>
+	</PropertyGroup>
 
-  <!-- Reference WinForms for .NET 7.0 on macOS -->
-  <ItemGroup Condition="!($(TargetFramework.Contains('-windows')) or $(TargetFramework.StartsWith('net4')))">
-    <!-- Rhino 8.11 and later you can use this -->
-    <!-- <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" /> -->
-    
-    <!-- Rhino 8.10 and earlier -->
-    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net48" Version="1.0.3" ExcludeAssets="all" GeneratePathProperty="true" />
-    <Reference Include="$(PkgMicrosoft_NETFramework_ReferenceAssemblies_net48)\build\.NETFramework\v4.8\System.Windows.Forms.dll" Private="False" />
-    <PackageReference Include="System.Drawing.Common" Version="7.0.0" ExcludeAssets="runtime" />
-  </ItemGroup>
-  <ItemGroup>
-    <Reference Include="ETABSv1">
-      <HintPath>ETABSv1.dll</HintPath>
-    </Reference>
-    <Reference Include="Microsoft.CSharp" />
-    <Reference Include="Microsoft.VisualBasic" />
-  </ItemGroup>
-  <ItemGroup>
-    <Compile Update="Properties\Resources.Designer.cs">
-      <DesignTime>True</DesignTime>
-      <AutoGen>True</AutoGen>
-      <DependentUpon>Resources.resx</DependentUpon>
-    </Compile>
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Update="Properties\Resources.resx">
-      <Generator>ResXFileCodeGenerator</Generator>
-      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
-    </EmbeddedResource>
-  </ItemGroup>
-  <ItemGroup>
-    <None Update="ETABSv1.dll">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-    <Exec Command=":: Determine the Grasshopper libraries folder&#xD;&#xA;if not &quot;%25GH_LIB%25&quot;==&quot;&quot; goto gh_lib_ready&#xD;&#xA;if not &quot;%25APPDATA%25&quot;==&quot;&quot; set &quot;GH_LIB=%25APPDATA%25\Grasshopper\Libraries&quot; &amp; goto gh_lib_ready&#xD;&#xA;if not &quot;%25USERPROFILE%25&quot;==&quot;&quot; set &quot;GH_LIB=%25USERPROFILE%25\AppData\Roaming\Grasshopper\Libraries&quot; &amp; goto gh_lib_ready&#xD;&#xA;echo Failed to determine Grasshopper library folder.&amp;exit /b 1&#xD;&#xA;:gh_lib_ready&#xD;&#xA;if not exist &quot;%25GH_LIB%25&quot; mkdir &quot;%25GH_LIB%25&quot;&#xD;&#xA;&#xD;&#xA;:: Copy your plugin as .gha&#xD;&#xA;copy /y &quot;$(TargetPath)&quot; &quot;%25GH_LIB%25\$(TargetName).gha&quot;&#xD;&#xA;&#xD;&#xA;:: Copy ETABS interop(s) if present in the build output&#xD;&#xA;for %25%25F in (ETABSv1.dll Interop.ETABSv1.dll AxInterop.ETABSv1.dll) do (&#xD;&#xA;  if exist &quot;$(TargetDir)%25%25F&quot; copy /y &quot;$(TargetDir)%25%25F&quot; &quot;%25GH_LIB%25&quot;&#xD;&#xA;)&#xD;&#xA;&#xD;&#xA;:: Copy debug symbols so the debugger can detect the plugin&#xD;&#xA;if exist &quot;$(TargetDir)$(TargetName).pdb&quot; copy /y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;%25GH_LIB%25\$(TargetName).pdb&quot;" />
-  </Target>
+	<PropertyGroup>
+		<Version>1.0</Version>
+		<Title>MGT</Title>
+		<Company>Meinhardt</Company>
+		<Description>Meinhardt Grasshopper Tool</Description>
+	</PropertyGroup>
 
+	<!-- Excel COM Interop (Windows only) -->
+	<ItemGroup>
+		<COMReference Include="Microsoft.Office.Interop.Excel">
+			<WrapperTool>tlbimp</WrapperTool>
+			<VersionMajor>1</VersionMajor>
+			<VersionMinor>9</VersionMinor>
+			<Guid>00020813-0000-0000-C000-000000000046</Guid>
+			<Lcid>0</Lcid>
+			<Isolated>false</Isolated>
+			<EmbedInteropTypes>true</EmbedInteropTypes>
+		</COMReference>
+	</ItemGroup>
+
+	<!-- Grasshopper SDK for compile-time only (Rhino provides runtime) -->
+	<ItemGroup>
+		<PackageReference Include="Grasshopper" Version="8.0.23304.9001" ExcludeAssets="runtime" />
+	</ItemGroup>
+
+	<!-- ETABS COM Interop: DO NOT embed; copy DLL next to the .gha -->
+	<ItemGroup>
+		<Reference Include="ETABSv1">
+			<HintPath>ETABSv1.dll</HintPath>
+			<EmbedInteropTypes>false</EmbedInteropTypes>
+			<Private>true</Private>
+			<!-- ensure it is copied to output -->
+		</Reference>
+		<!-- Remove these if unused -->
+		<Reference Include="Microsoft.CSharp" />
+		<Reference Include="Microsoft.VisualBasic" />
+	</ItemGroup>
+
+	<!-- Resources -->
+	<ItemGroup>
+		<Compile Update="Properties\Resources.Designer.cs">
+			<DesignTime>True</DesignTime>
+			<AutoGen>True</AutoGen>
+			<DependentUpon>Resources.resx</DependentUpon>
+		</Compile>
+		<EmbeddedResource Update="Properties\Resources.resx">
+			<Generator>ResXFileCodeGenerator</Generator>
+			<LastGenOutput>Resources.Designer.cs</LastGenOutput>
+		</EmbeddedResource>
+	</ItemGroup>
+
+	<!-- Always ship ETABSv1.dll with the plugin output -->
+	<ItemGroup>
+		<None Update="ETABSv1.dll">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+	</ItemGroup>
+
+	<!-- Post-build: copy .gha (+interop DLLs if present) to Grasshopper\Libraries -->
+	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
+		<Exec Command=":: Resolve GH Libraries folder
+if not &quot;%25GH_LIB%25&quot;==&quot;&quot; goto gh_lib_ready
+if not &quot;%25APPDATA%25&quot;==&quot;&quot; set &quot;GH_LIB=%25APPDATA%25\Grasshopper\Libraries&quot; &amp; goto gh_lib_ready
+if not &quot;%25USERPROFILE%25&quot;==&quot;&quot; set &quot;GH_LIB=%25USERPROFILE%25\AppData\Roaming\Grasshopper\Libraries&quot; &amp; goto gh_lib_ready
+echo Failed to determine Grasshopper library folder.&amp;exit /b 1
+:gh_lib_ready
+if not exist &quot;%25GH_LIB%25&quot; mkdir &quot;%25GH_LIB%25&quot;
+
+:: Copy your plugin (.gha) and symbols (optional)
+copy /y &quot;$(TargetPath)&quot; &quot;%25GH_LIB%25\$(TargetName).gha&quot;
+if exist &quot;$(TargetDir)$(TargetName).pdb&quot; copy /y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;%25GH_LIB%25\$(TargetName).pdb&quot;
+
+:: Copy ETABS interop(s) if present
+for %25%25F in (ETABSv1.dll Interop.ETABSv1.dll AxInterop.ETABSv1.dll) do (
+  if exist &quot;$(TargetDir)%25%25F&quot; copy /y &quot;$(TargetDir)%25%25F&quot; &quot;%25GH_LIB%25&quot;
+)
+" />
+	</Target>
 </Project>
