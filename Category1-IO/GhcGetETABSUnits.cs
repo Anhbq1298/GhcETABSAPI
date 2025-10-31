@@ -1,7 +1,7 @@
 ﻿// -------------------------------------------------------------
 // Component: GhcGetETABSUnits
 // Purpose  : Return current ETABS units (force/length/temperature)
-// Target   : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
+// Target   : Rhino 7/8 + Grasshopper, .NET Framework 8.0 (x64)
 // Depends  : Grasshopper, ETABSv1 (COM)  [Embed Interop Types = False]
 // Panel    : "ETABS" / "IO"
 // Author   : Anh Bui

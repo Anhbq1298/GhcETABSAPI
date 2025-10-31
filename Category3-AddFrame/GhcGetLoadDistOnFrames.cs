@@ -1,7 +1,7 @@
 ﻿// -------------------------------------------------------------
 // Component : Get Frame Distributed Loads (Auto Refresh)
 // Author    : Anh Bui
-// Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
+// Target    : Rhino 7/8 + Grasshopper, .NET Framework 8.0 (x64)
 // Depends   : Grasshopper, ETABSv1 (COM)  [Embed Interop Types = False]
 // Panel     : "MGT" / "3.0 Frame Object Modelling"
 // GUID      : f5c5b1db-a90c-4f1f-9d5f-3f5b3be3c35e

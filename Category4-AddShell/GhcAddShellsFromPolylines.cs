@@ -1,6 +1,6 @@
 ﻿// -------------------------------------------------------------
 // Component : ETABS Add Shells from Polylines
-// Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
+// Target    : Rhino 7/8 + Grasshopper, .NET Framework 8.0 (x64)
 // Depends   : RhinoCommon, Grasshopper, ETABSv1 (COM)
 // Panel     : "ETABS" / "Area Object Modelling"
 // Author    : Anh Bui

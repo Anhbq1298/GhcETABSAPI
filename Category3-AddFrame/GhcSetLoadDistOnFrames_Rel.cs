@@ -1,7 +1,7 @@
 ﻿// -------------------------------------------------------------
 // Component : Set Frame Distributed Loads (relative distances)
 // Author    : Anh Bui
-// Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
+// Target    : Rhino 7/8 + Grasshopper, .NET Framework 8.0 (x64)
 // Depends   : Grasshopper, ETABSv1 (COM)  [Embed Interop Types = False]
 // Panel     : "MGT" / "3.0 Frame Object Modelling"
 // -------------------------------------------------------------

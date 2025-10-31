@@ -1,7 +1,7 @@
 ﻿// -------------------------------------------------------------
 // Component : ETABS Attach (minimal)
 // Author    : Anh Bui
-// Target    : Rhino 7/8 + Grasshopper (.NET Framework 4.8 x64)
+// Target    : Rhino 7/8 + Grasshopper (.NET Framework 8.0 x64)
 // Depends   : Grasshopper, ETABSv1 (COM), System.Windows.Forms
 // Panel     : "1.0" / "IO"
 //

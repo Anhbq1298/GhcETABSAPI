@@ -1,7 +1,7 @@
 ﻿// -------------------------------------------------------------
 // Component : ETABS Assign Frame Section (FrameObj.SetSection)
 // Author    : Anh Bui (original pattern), extended by OpenAI assistant
-// Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
+// Target    : Rhino 7/8 + Grasshopper, .NET Framework 8.0 (x64)
 // Depends   : Grasshopper, ETABSv1 (COM)
 // Panel     : "MGT" / "3.0 Frame Object Modelling"
 // -------------------------------------------------------------
