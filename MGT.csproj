@@ -1,6 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<!-- Rhino 8 on Windows, .NET 8 -->
 		<TargetFramework>net8.0-windows</TargetFramework>
 		<TargetExt>.gha</TargetExt>
 		<EnableDynamicLoading>true</EnableDynamicLoading>
@@ -42,16 +41,12 @@
 			<HintPath>ETABSv1.dll</HintPath>
 			<EmbedInteropTypes>false</EmbedInteropTypes>
 			<Private>true</Private>
-			<!-- ensure it is copied to output -->
 		</Reference>
-		<!-- Remove these if unused -->
-		<Reference Include="Microsoft.CSharp" />
-		<Reference Include="Microsoft.VisualBasic" />
 	</ItemGroup>
 
 	<!-- Resources -->
 	<ItemGroup>
-		<Compile Update="Properties\Resources.Designer.cs">
+		<Compile Update="Properties\Resource​s.Designer.cs">
 			<DesignTime>True</DesignTime>
 			<AutoGen>True</AutoGen>
 			<DependentUpon>Resources.resx</DependentUpon>
@@ -79,11 +74,9 @@ echo Failed to determine Grasshopper library folder.&amp;exit /b 1
 :gh_lib_ready
 if not exist &quot;%25GH_LIB%25&quot; mkdir &quot;%25GH_LIB%25&quot;
 
-:: Copy your plugin (.gha) and symbols (optional)
 copy /y &quot;$(TargetPath)&quot; &quot;%25GH_LIB%25\$(TargetName).gha&quot;
 if exist &quot;$(TargetDir)$(TargetName).pdb&quot; copy /y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;%25GH_LIB%25\$(TargetName).pdb&quot;
 
-:: Copy ETABS interop(s) if present
 for %25%25F in (ETABSv1.dll Interop.ETABSv1.dll AxInterop.ETABSv1.dll) do (
   if exist &quot;$(TargetDir)%25%25F&quot; copy /y &quot;$(TargetDir)%25%25F&quot; &quot;%25GH_LIB%25&quot;
 )
