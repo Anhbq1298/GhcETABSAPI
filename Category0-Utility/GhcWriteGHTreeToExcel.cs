@@ -2,7 +2,7 @@
 // Component : Write GH Tree To Excel
 // Author    : Anh Bui (extended by ChatGPT)
 // Encoding  : UTF-8
-// Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
+// Target    : Rhino 7/8 + Grasshopper, .NET Framework 8.0 (x64)
 // Depends   : RhinoCommon, Grasshopper, Microsoft.Office.Interop.Excel
 // Panel     : Category = "MGT", Subcategory = "0.0 Utility"
 // Build     : x64; Excel interop reference -> Embed Interop Types = False

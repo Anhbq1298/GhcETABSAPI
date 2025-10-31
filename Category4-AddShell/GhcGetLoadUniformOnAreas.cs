@@ -1,7 +1,7 @@
 ﻿// -------------------------------------------------------------
 // Component : Get Area Uniform Loads (per-object query)
 // Author    : Anh Bui
-// Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
+// Target    : Rhino 7/8 + Grasshopper, .NET Framework 8.0 (x64)
 // Depends   : Grasshopper, ETABSv1 (COM)  [Embed Interop Types = False]
 // Panel     : "MGT" / "3.0 Shell (Area) Object Modelling"
 // GUID      : 77f15ab0-1587-4e9b-8a47-335c50a62ddb

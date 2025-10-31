@@ -1,7 +1,7 @@
 // -------------------------------------------------------------
 // Component : Get All Frame Info
 // Author    : Anh Bui
-// Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
+// Target    : Rhino 7/8 + Grasshopper, .NET Framework 8.0 (x64)
 // Depends   : Grasshopper, ETABSv1 (COM)  [Embed Interop Types = False]
 // Panel     : "MGT" / "3.0 Frame Object Modelling"
 // GUID      : b8c5cf76-2b02-44ad-885d-1be3cc8d2b5c

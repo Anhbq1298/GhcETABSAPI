@@ -1,7 +1,7 @@
 ﻿// -------------------------------------------------------------
 // Component : Get Rhino Units (minimal)
 // Author    : Anh Bui
-// Target    : Rhino 7/8 + Grasshopper (.NET Framework 4.8 x64)
+// Target    : Rhino 7/8 + Grasshopper (.NET Framework 8.0 x64)
 // Depends   : RhinoCommon, Grasshopper
 // Panel     : "Rhino" / "Document"
 //

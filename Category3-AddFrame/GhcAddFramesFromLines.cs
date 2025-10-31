@@ -1,7 +1,7 @@
 ﻿// -------------------------------------------------------------
 // Component : Add Frames to ETABS
 // Author    : Anh Bui
-// Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
+// Target    : Rhino 7/8 + Grasshopper, .NET Framework 8.0 (x64)
 // Depends   : RhinoCommon, Grasshopper, ETABSv1 (COM)
 // Panel     : Category = "ETABS", Subcategory = "Frame Object Modelling"
 // Build     : x64; ETABSv1 reference -> Embed Interop Types = False

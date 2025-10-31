@@ -1,6 +1,6 @@
 ﻿// -------------------------------------------------------------
 // Component : Unit Scale Factor
-// Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
+// Target    : Rhino 7/8 + Grasshopper, .NET Framework 8.0 (x64)
 // Depends   : Grasshopper
 // Panel     : "MGT" / "01. IO"
 // Author    : Anh Bui

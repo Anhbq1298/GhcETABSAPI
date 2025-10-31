@@ -1,7 +1,7 @@
 ﻿// -------------------------------------------------------------
 // Component : Set Frame Distributed Loads (relative, Excel diff)
 // Author    : Anh Bui (extended), updated by OpenAI assistant
-// Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
+// Target    : Rhino 7/8 + Grasshopper, .NET Framework 8.0 (x64)
 // Depends   : Grasshopper, ETABSv1 (COM), Microsoft.Office.Interop.Excel
 // Panel     : "MGT" / "3.0 Frame Object Modelling"
 // -------------------------------------------------------------
