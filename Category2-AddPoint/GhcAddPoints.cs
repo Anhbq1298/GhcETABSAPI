@@ -10,6 +10,7 @@
 //   1) sapModel    (ETABSv1.cSapModel, item)  ETABS model from the Attach component.
 //   2) points      (Rhino.Geometry.Point3d, list)  Grasshopper points to transfer to ETABS.
 //   3) uniqueNames (string, list)  Optional point names; matched by index, with blanks letting ETABS auto-name.
+//   4) scale       (double, item)  Coordinate multiplier (e.g., 1000 for mm→m).
 //
 // Outputs:
 //   0) msg         (string, item)  Summary/status message.
@@ -18,7 +19,7 @@
 // Behavior Notes:
 //   • Rising-edge gate ensures ETABS is only touched on explicit button press.
 //   • Invalid Grasshopper points are skipped and reported.
-//   • Optional uniqueNames can rename the created points when unique and valid.
+//   • Optional uniqueNames can assign custom names when unique and valid.
 //   • Model is unlocked before modifications via ComponentShared.EnsureModelUnlocked.
 // -------------------------------------------------------------
 
@@ -32,13 +33,13 @@ using static MGT.ComponentShared;
 
 namespace MGT
 {
-    public class GhcSetPoints : GH_Component
+    public class GhcAddPoints : GH_Component
     {
         private bool _lastAdd;
         private string _lastMsg = "Idle.";
         private readonly List<string> _lastNames = new List<string>();
 
-        public GhcSetPoints()
+        public GhcAddPoints()
           : base(
                 "ETABS Set Points",
                 "SetPoints",
@@ -62,6 +63,7 @@ namespace MGT
             p.AddPointParameter("points", "points", "Grasshopper points to create in ETABS.", GH_ParamAccess.list);
             int uniqueNamesIndex = p.AddTextParameter("uniqueNames", "uniqueNames", "Optional ETABS point names matched by index; leave blank to let ETABS decide.", GH_ParamAccess.list);
             p[uniqueNamesIndex].Optional = true;
+            p.AddNumberParameter("scale", "scale", "Coordinate multiplier (e.g., 1000 for mm→m).", GH_ParamAccess.item, 1.0);
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager p)
@@ -76,11 +78,18 @@ namespace MGT
             cSapModel sapModel = null;
             List<Point3d> points = new List<Point3d>();
             List<string> uniqueNames = new List<string>();
+            double scale = 1.0;
 
             da.GetData(0, ref add);
             da.GetData(1, ref sapModel);
             da.GetDataList(2, points);
             da.GetDataList(3, uniqueNames);
+            da.GetData(4, ref scale);
+
+            if (IsInvalidNumber(scale) || scale <= 0.0)
+            {
+                scale = 1.0;
+            }
 
             bool rising = !_lastAdd && add;
             if (!rising)
@@ -113,11 +122,11 @@ namespace MGT
                 List<string> resolvedNames = ResolveNames(uniqueNames, count, out broadcastWarning);
 
                 int added = 0;
-                int renamed = 0;
+                int customNamed = 0;
                 int skipped = 0;
                 int failed = 0;
                 int duplicateRequested = 0;
-                int renameFailed = 0;
+                int namingFailed = 0;
 
                 HashSet<string> requestedSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -131,8 +140,22 @@ namespace MGT
                         continue;
                     }
 
-                    string etabsName = string.Empty;
-                    int ret = sapModel.PointObj.AddCartesian(ghPoint.X, ghPoint.Y, ghPoint.Z, ref etabsName);
+                    string requested = resolvedNames[i];
+                    if (!string.IsNullOrEmpty(requested))
+                    {
+                        if (!requestedSet.Add(requested))
+                        {
+                            duplicateRequested++;
+                            requested = string.Empty;
+                        }
+                    }
+
+                    string etabsName = string.IsNullOrEmpty(requested) ? string.Empty : requested;
+                    int ret = sapModel.PointObj.AddCartesian(
+                        ghPoint.X * scale,
+                        ghPoint.Y * scale,
+                        ghPoint.Z * scale,
+                        ref etabsName);
                     if (ret != 0 || string.IsNullOrWhiteSpace(etabsName))
                     {
                         failed++;
@@ -142,62 +165,44 @@ namespace MGT
 
                     added++;
 
-                    string requested = resolvedNames[i];
                     if (!string.IsNullOrEmpty(requested))
                     {
-                        if (requestedSet.Add(requested))
+                        if (string.Equals(etabsName, requested, StringComparison.OrdinalIgnoreCase))
                         {
-                            int renameRet = 0;
-                            try
-                            {
-                                renameRet = sapModel.PointObj.ChangeName(etabsName, requested);
-                            }
-                            catch
-                            {
-                                renameRet = -1;
-                            }
-
-                            if (renameRet == 0)
-                            {
-                                etabsName = requested;
-                                renamed++;
-                            }
-                            else
-                            {
-                                renameFailed++;
-                            }
+                            customNamed++;
                         }
                         else
                         {
-                            duplicateRequested++;
+                            namingFailed++;
                         }
                     }
 
                     createdNames.Add(etabsName);
                 }
 
+                List<string> warnings = new List<string>();
                 if (!string.IsNullOrEmpty(broadcastWarning))
                 {
-                    message = broadcastWarning;
+                    warnings.Add(broadcastWarning);
                 }
-                else
-                {
-                    message = string.Empty;
-                }
-
-                string summary = $"Done: {added} point(s) created, {renamed} renamed, {skipped} skipped, {failed} failed.";
 
                 if (duplicateRequested > 0)
                 {
-                    summary += $" {duplicateRequested} duplicate name request(s) ignored.";
+                    warnings.Add($"{duplicateRequested} duplicate name request(s) ignored.");
                 }
 
-                if (renameFailed > 0)
+                if (namingFailed > 0)
                 {
-                    summary += $" {renameFailed} rename attempt(s) failed.";
+                    warnings.Add($"{namingFailed} requested name(s) rejected by ETABS.");
                 }
 
-                message = string.IsNullOrEmpty(message) ? summary : message + " " + summary;
+                string summary = $"Done: {added} point(s) created, {customNamed} custom-named, {skipped} skipped, {failed} failed.";
+                if (warnings.Count > 0)
+                {
+                    summary += " Warnings: " + string.Join(" | ", warnings);
+                }
+
+                message = summary;
             }
             catch (Exception ex)
             {
