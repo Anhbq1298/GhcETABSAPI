@@ -41,8 +41,8 @@ namespace MGT
 
         public GhcAddPoints()
           : base(
-                "ETABS Set Points",
-                "SetPoints",
+                "ETABS Add Points",
+                "AddPoints",
                 "Create ETABS point objects from Grasshopper Point3d geometry with optional custom names.\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                 "MGT",
                 "2.0 Point Object Modelling")
@@ -210,7 +210,6 @@ namespace MGT
                 createdNames.Clear();
             }
 
-            this.Message = message;
 
             da.SetData(0, message);
             da.SetDataList(1, createdNames);
