@@ -9,8 +9,8 @@
 //   0) add         (bool, item)    Rising-edge trigger; executes on False→True transition.
 //   1) sapModel    (ETABSv1.cSapModel, item)  ETABS model from the Attach component.
 //   2) points      (Rhino.Geometry.Point3d, list)  Grasshopper points to transfer to ETABS.
-//   3) scale       (double, item)  Coordinate multiplier (e.g., 1000 for mm→m).
-//   4) uniqueNames (string, list)  Optional point names; matched by index, with blanks letting ETABS auto-name.
+//   3) uniqueNames (string, list)  Optional point names; matched by index, with blanks letting ETABS auto-name.
+//   4) scale       (double, item)  Coordinate multiplier (e.g., 1000 for mm→m).
 //
 // Outputs:
 //   0) msg         (string, item)  Summary/status message.
@@ -61,9 +61,9 @@ namespace MGT
             p.AddBooleanParameter("add", "add", "Press to run once (rising edge).", GH_ParamAccess.item, false);
             p.AddGenericParameter("sapModel", "sapModel", "ETABS cSapModel from the Attach component.", GH_ParamAccess.item);
             p.AddPointParameter("points", "points", "Grasshopper points to create in ETABS.", GH_ParamAccess.list);
-            p.AddNumberParameter("scale", "scale", "Coordinate multiplier (e.g., 1000 for mm→m).", GH_ParamAccess.item, 1.0);
             int uniqueNamesIndex = p.AddTextParameter("uniqueNames", "uniqueNames", "Optional ETABS point names matched by index; leave blank to let ETABS decide.", GH_ParamAccess.list);
             p[uniqueNamesIndex].Optional = true;
+            p.AddNumberParameter("scale", "scale", "Coordinate multiplier (e.g., 1000 for mm→m).", GH_ParamAccess.item, 1.0);
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager p)
@@ -77,14 +77,14 @@ namespace MGT
             bool add = false;
             cSapModel sapModel = null;
             List<Point3d> points = new List<Point3d>();
-            double scale = 1.0;
             List<string> uniqueNames = new List<string>();
+            double scale = 1.0;
 
             da.GetData(0, ref add);
             da.GetData(1, ref sapModel);
             da.GetDataList(2, points);
-            da.GetData(3, ref scale);
-            da.GetDataList(4, uniqueNames);
+            da.GetDataList(3, uniqueNames);
+            da.GetData(4, ref scale);
 
             if (IsInvalidNumber(scale) || scale <= 0.0)
             {
