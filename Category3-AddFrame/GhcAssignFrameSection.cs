@@ -3,7 +3,7 @@
 // Author    : Anh Bui (original pattern), extended by OpenAI assistant
 // Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
 // Depends   : Grasshopper, ETABSv1 (COM)
-// Panel     : "MGT" / "2.0 Frame Object Modelling"
+// Panel     : "MGT" / "3.0 Frame Object Modelling"
 // -------------------------------------------------------------
 //
 // Inputs (ordered):
@@ -44,7 +44,7 @@ namespace MGT
                 "FrSetSection",
                 "Assign ETABS frame objects to section properties via FrameObj.SetSection.\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                 "MGT",
-                "2.0 Frame Object Modelling")
+                "3.0 Frame Object Modelling")
         { }
 
         public override Guid ComponentGuid => new Guid("0f6d2420-a1a1-4d65-8ed5-b0a49d94bc4a");

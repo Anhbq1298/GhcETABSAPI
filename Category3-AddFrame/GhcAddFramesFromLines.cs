@@ -52,7 +52,7 @@ namespace MGT
                 "AddFramesToETABS",                 // Nickname
                 "Create ETABS frame objects from Rhino.Geometry.Line with per-line property and optional user name.\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                 "MGT",                        // Category (tab)
-                "2.0 Frame Object Modelling"        // Subcategory (panel)
+                "3.0 Frame Object Modelling"        // Subcategory (panel)
             )
         { }
 

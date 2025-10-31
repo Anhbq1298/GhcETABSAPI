@@ -47,7 +47,7 @@ namespace MGT
           : base("ETABS Add Shells", "AddShells",
                  "Create ETABS shell areas from closed Rhino polylines.\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                  "MGT",                            // Category (tab)
-                 "3.0 Area Object Modelling"            // Subcategory (panel)
+                 "4.0 Area Object Modelling"            // Subcategory (panel)
                  )
         { }
 

@@ -3,7 +3,7 @@
 // Author    : Anh Bui (extended), updated by OpenAI assistant
 // Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
 // Depends   : Grasshopper, ETABSv1 (COM), Microsoft.Office.Interop.Excel
-// Panel     : "MGT" / "2.0 Frame Object Modelling"
+// Panel     : "MGT" / "3.0 Frame Object Modelling"
 // -------------------------------------------------------------
 // Class diagram (simplified)
 //   +--------------------------------------------+
@@ -76,7 +76,7 @@ namespace MGT
                 "SetFrameUDLRelDiff",
                 "Assign distributed loads to ETABS frame objects by reading an Excel worksheet, with optional auto-removal of missing frame/pattern combos.\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                 "MGT",
-                "2.0 Frame Object Modelling")
+                "3.0 Frame Object Modelling")
         {
         }
 

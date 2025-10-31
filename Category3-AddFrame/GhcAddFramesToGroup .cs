@@ -3,7 +3,7 @@
 // Author    : Anh Bui
 // Target    : Rhino 7/8 + Grasshopper, .NET Framework 4.8 (x64)
 // Depends   : Grasshopper, ETABSv1 (COM)  [Embed Interop Types = False]
-// Panel     : "MGT" / "2.0 Frame Object Modelling"
+// Panel     : "MGT" / "3.0 Frame Object Modelling"
 // -------------------------------------------------------------
 //
 // Inputs (ordered):
@@ -43,7 +43,7 @@ namespace MGT
                 "FrToGroup",
                 "Add ETABS frame objects to a group (auto-define with SetGroup_1, minimal).\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                 "MGT",
-                "2.0 Frame Object Modelling")
+                "3.0 Frame Object Modelling")
         { }
 
         // New GUID for this version

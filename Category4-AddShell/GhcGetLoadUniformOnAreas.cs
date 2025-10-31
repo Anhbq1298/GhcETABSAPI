@@ -52,7 +52,7 @@ namespace MGT
                 "GetAreaLoads",
                 "Query uniform surface loads assigned to ETABS area objects (per object mode).\nDeveloped by Mark Bui Quang Anh - Mark.Bui@meinhardtgroup.com",
                 "MGT",
-                "3.0 Area Object Modelling"  )
+                "4.0 Area Object Modelling"  )
         {
         }
 
