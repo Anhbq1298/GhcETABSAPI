@@ -8,7 +8,6 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using Excel = Microsoft.Office.Interop.Excel;
-using Microsoft.VisualBasic;
 
 namespace MGT
 {
@@ -262,9 +261,7 @@ namespace MGT
         }
 
         /// <summary>
-        /// Try to get a running Excel instance WITHOUT Marshal.GetActiveObject.
-        /// 1) VB Interaction.GetObject
-        /// 2) HWND/Accessibility (FindWindowEx + AccessibleObjectFromWindow)
+        /// Try to get a running Excel instance using COM discovery and UI automation fallbacks.
         /// </summary>
         private static Excel.Application TryGetRunningExcelApplication()
         {
@@ -273,10 +270,10 @@ namespace MGT
 
             void Probe()
             {
-                // --- Route 1: VB Interaction ---
+                // --- Route 1: Marshal.GetActiveObject ---
                 try
                 {
-                    object obj = Interaction.GetObject(null, "Excel.Application");
+                    object obj = Marshal.GetActiveObject("Excel.Application");
                     result = obj as Excel.Application;
                     if (result != null) return;
 
@@ -351,7 +348,7 @@ namespace MGT
             }
 
             if (result == null && captured != null)
-                Debug.WriteLine("Excel not reachable via Interaction/AccessibleObject: " + captured.Message);
+                Debug.WriteLine("Excel not reachable via COM/UI automation: " + captured.Message);
 
             return result;
         }
