@@ -7,12 +7,13 @@ MGT (Meinhardt Grasshopper Tool) is a Grasshopper plug-in that wraps parts of th
 The solution is organised as Grasshopper component categories that mirror the tabs visible inside Grasshopper:
 
 - `Category0-Utility/GhcWriteGHTreeToExcel.cs` – exports a Grasshopper data tree to Excel using `ExcelHelpers` for COM handling.
+- `Category1-AddPoint/` – placeholder for point-based ETABS components.
 - `Category1-IO/` – connection and unit utilities including:
   - `GhcAttachETABSInstance.cs` – attaches to an ETABS session.
   - `GhcGetETABSUnits.cs` and `GhcGetRhinoUnits.cs` – report active unit systems.
   - `GhcUnitScaleFactor .cs` – computes length conversion factors.
-- `Category2-AddFrame/` – frame element tools such as section assignment, creation from Rhino curves, grouping, and load extraction.
-- `Category3-AddShell/GhcAddShellsFromPolylines.cs` – creates ETABS shell elements from Grasshopper geometry.
+- `Category3-AddFrame/` – frame element tools such as section assignment, creation from Rhino curves, grouping, and load extraction.
+- `Category4-AddShell/GhcAddShellsFromPolylines.cs` – creates ETABS shell elements from Grasshopper geometry.
 - `ExcelHelpers.cs` – shared Excel automation helpers used by export components.
 - `Resources/` – embedded icons referenced by the Grasshopper components.
 
