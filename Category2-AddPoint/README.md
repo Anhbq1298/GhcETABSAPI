@@ -1,3 +1,5 @@
-# Category1-AddPoint
+# Category2-AddPoint
 
-This folder will host point-related Grasshopper components for ETABS integration.
+Point related Grasshopper components for ETABS integration. The Excel sync logic now lives entirely
+inside `GhcSyncPointCoordinatesFromExcel.cs` so newcomers have a single file to inspect for the
+component, workflow, Excel reader, and reporting helpers.
