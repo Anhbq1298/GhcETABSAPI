@@ -61,6 +61,7 @@ namespace MGT
             p.AddGenericParameter("sapModel", "sapModel", "ETABS cSapModel from the Attach component.", GH_ParamAccess.item);
             p.AddPointParameter("points", "points", "Grasshopper points to create in ETABS.", GH_ParamAccess.list);
             p.AddTextParameter("uniqueNames", "uniqueNames", "Optional ETABS point names matched by index; leave blank to let ETABS decide.", GH_ParamAccess.list);
+            p[3].Optional = true;
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager p)
