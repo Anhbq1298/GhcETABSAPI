@@ -17,7 +17,7 @@
 // Behavior Notes:
 //   • When no point names are supplied, the component queries all available point object names.
 //   • Duplicated or blank point names are removed while preserving the first occurrence ordering.
-//   • Each column branch lines up with the header labels: UniqueName, Label, Story, X, Y, Z.
+//   • Each column branch lines up with the header labels: UniqueName, X, Y, Z.
 // -------------------------------------------------------------
 
 using System;
@@ -35,8 +35,6 @@ namespace MGT
         private static readonly string[] HeaderLabels =
         {
             "UniqueName",
-            "Label",
-            "Story",
             "X",
             "Y",
             "Z"
@@ -46,7 +44,7 @@ namespace MGT
           : base(
                 "Get Point Info",
                 "GetPointInfo",
-                "Retrieve key information about ETABS point objects (label, story, coordinates).",
+                "Retrieve unique names and Cartesian coordinates of ETABS point objects.",
                 "MGT",
                 "2.0 Point Object Modelling")
         {
@@ -219,8 +217,6 @@ namespace MGT
                 }
 
                 string trimmedName = name.Trim();
-                string label = string.Empty;
-                string story = string.Empty;
                 double x = double.NaN;
                 double y = double.NaN;
                 double z = double.NaN;
@@ -244,28 +240,7 @@ namespace MGT
                     success = false;
                 }
 
-                try
-                {
-                    int retLabel = sapModel.PointObj.GetLabelFromName(trimmedName, ref label, ref story);
-                    if (retLabel != 0)
-                    {
-                        warnings?.Add($"Point \"{trimmedName}\": GetLabelFromName returned {retLabel}.");
-                        label = string.Empty;
-                        story = string.Empty;
-                        success = false;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    warnings?.Add($"Point \"{trimmedName}\": GetLabelFromName exception - {ex.Message}");
-                    label = string.Empty;
-                    story = string.Empty;
-                    success = false;
-                }
-
                 result.UniqueName.Add(trimmedName);
-                result.Label.Add(label ?? string.Empty);
-                result.Story.Add(story ?? string.Empty);
                 result.X.Add(SanitizeDouble(x));
                 result.Y.Add(SanitizeDouble(y));
                 result.Z.Add(SanitizeDouble(z));
@@ -314,14 +289,10 @@ namespace MGT
                 case 0:
                     return result.UniqueName[rowIndex];
                 case 1:
-                    return result.Label[rowIndex];
-                case 2:
-                    return result.Story[rowIndex];
-                case 3:
                     return result.X[rowIndex];
-                case 4:
+                case 2:
                     return result.Y[rowIndex];
-                case 5:
+                case 3:
                     return result.Z[rowIndex];
                 default:
                     throw new ArgumentOutOfRangeException(nameof(columnIndex));
@@ -370,8 +341,6 @@ namespace MGT
         private sealed class PointInfoResult
         {
             internal List<string> UniqueName { get; } = new List<string>();
-            internal List<string> Label { get; } = new List<string>();
-            internal List<string> Story { get; } = new List<string>();
             internal List<double> X { get; } = new List<double>();
             internal List<double> Y { get; } = new List<double>();
             internal List<double> Z { get; } = new List<double>();
