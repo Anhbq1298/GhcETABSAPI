@@ -540,7 +540,7 @@ namespace MGT
                     continue;
                 }
 
-                int moveRet = sapModel.EditGeneral.Move(false, dx, dy, dz);
+                int moveRet = sapModel.EditGeneral.Move(dx, dy, dz);
                 sapModel.PointObj.SetSelected(workingName, false);
 
                 if (moveRet == 0)
