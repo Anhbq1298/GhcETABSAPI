@@ -354,22 +354,38 @@ namespace MGT
 
         private static Excel.Worksheet FindWorksheet(Excel.Workbook workbook, string sheetName)
         {
+            if (workbook == null)
+            {
+                return null;
+            }
+
             Excel.Sheets sheets = null;
+            Excel.Worksheet target = null;
+
             try
             {
                 sheets = workbook.Worksheets;
-                foreach (Excel.Worksheet worksheet in sheets)
+                int count = sheets?.Count ?? 0;
+
+                for (int i = 1; i <= count; i++)
                 {
+                    Excel.Worksheet candidate = null;
                     try
                     {
-                        if (worksheet != null && string.Equals(worksheet.Name, sheetName, StringComparison.OrdinalIgnoreCase))
+                        candidate = sheets[i] as Excel.Worksheet;
+                        if (candidate != null && string.Equals(candidate.Name, sheetName, StringComparison.OrdinalIgnoreCase))
                         {
-                            return worksheet;
+                            target = candidate;
+                            candidate = null; // Ownership transferred to caller.
+                            break;
                         }
                     }
                     finally
                     {
-                        ExcelHelpers.ReleaseCom(worksheet);
+                        if (candidate != null)
+                        {
+                            ExcelHelpers.ReleaseCom(candidate);
+                        }
                     }
                 }
             }
@@ -378,7 +394,7 @@ namespace MGT
                 ExcelHelpers.ReleaseCom(sheets);
             }
 
-            return null;
+            return target;
         }
 
         private static string BuildExcelStatus(int processed, int total)
