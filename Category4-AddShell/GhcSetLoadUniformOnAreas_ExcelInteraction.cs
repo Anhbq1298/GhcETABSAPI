@@ -192,7 +192,10 @@ namespace MGT
                     throw new InvalidOperationException("Failed to query area object names from ETABS.");
                 }
 
-                HashSet<AreaPatternKey> baselineCombos = autoRemove ? CollectCombosFromValueTree(baselineTree) : null;
+                // Preserve the capture order of the baseline area/pattern
+                // combos so diff-driven removals match user expectations.
+                OrderedLookup<AreaPatternKey, AreaPatternKey> baselineCombos =
+                    autoRemove ? CollectCombosFromValueTree(baselineTree) : null;
                 HashSet<AreaPatternKey> desiredCombos = autoRemove ? CollectCombosFromExcel(excelData) : null;
 
                 if (autoRemove && baselineCombos != null && baselineCombos.Count > 0)
@@ -777,11 +780,13 @@ namespace MGT
 
         private static int AutoRemoveMissingCombos(
             cSapModel sapModel,
-            HashSet<AreaPatternKey> baselineCombos,
+            OrderedLookup<AreaPatternKey, AreaPatternKey> baselineCombos,
             HashSet<AreaPatternKey> desiredCombos,
             HashSet<string> existingNames,
             IList<string> removalSummaries)
         {
+            // Cross-check the saved baseline combos with the desired ones and
+            // drop any assignments no longer listed in Excel.
             if (sapModel == null || baselineCombos == null || baselineCombos.Count == 0)
             {
                 return 0;
@@ -791,7 +796,9 @@ namespace MGT
             HashSet<AreaPatternKey> attempted = new HashSet<AreaPatternKey>();
             int removedCount = 0;
 
-            foreach (AreaPatternKey combo in baselineCombos)
+            // Walk entries in their original order to keep deletions stable
+            // relative to the Excel snapshot.
+            foreach (AreaPatternKey combo in baselineCombos.Entries)
             {
                 if (!attempted.Add(combo))
                 {
@@ -805,6 +812,7 @@ namespace MGT
 
                 if (existingNames != null && !existingNames.Contains(combo.AreaName))
                 {
+                    // Avoid deleting loads for areas that are already gone.
                     continue;
                 }
 
@@ -827,12 +835,14 @@ namespace MGT
 
         private static HashSet<AreaPatternKey> CollectCombosFromExcel(ExcelLoadData data)
         {
+            // Capture the unique set of area/pattern pairs directly from Excel.
             HashSet<AreaPatternKey> combos = new HashSet<AreaPatternKey>();
             if (data == null)
             {
                 return combos;
             }
 
+            // Each row contributes at most one combo because HashSet removes duplicates.
             for (int i = 0; i < data.RowCount; i++)
             {
                 string area = TrimOrEmpty(data.AreaName[i]);
@@ -861,9 +871,9 @@ namespace MGT
             public int RowCount => AreaName.Count;
         }
 
-        private static HashSet<AreaPatternKey> CollectCombosFromValueTree(GH_Structure<IGH_Goo> tree)
+        private static OrderedLookup<AreaPatternKey, AreaPatternKey> CollectCombosFromValueTree(GH_Structure<IGH_Goo> tree)
         {
-            HashSet<AreaPatternKey> combos = new HashSet<AreaPatternKey>();
+            OrderedLookup<AreaPatternKey, AreaPatternKey> combos = new OrderedLookup<AreaPatternKey, AreaPatternKey>();
             if (tree == null)
             {
                 return combos;
@@ -880,6 +890,8 @@ namespace MGT
                 return combos;
             }
 
+            // Stitch the two branches back together so ordering matches the
+            // Grasshopper data tree users supplied.
             int rowCount = Math.Max(areaBranch.Count, patternBranch.Count);
             for (int i = 0; i < rowCount; i++)
             {
@@ -891,7 +903,10 @@ namespace MGT
                     continue;
                 }
 
-                combos.Add(new AreaPatternKey(area, pattern));
+                AreaPatternKey key = new AreaPatternKey(area, pattern);
+                // Feed both the ordered list and lookup so we retain sequence
+                // fidelity but can still query quickly by key.
+                combos.Add(key, key);
             }
 
             return combos;
@@ -911,6 +926,7 @@ namespace MGT
 
             if (goo is GH_String ghString)
             {
+                // Raw GH_String goo exposes its text on Value.
                 string candidate = ghString.Value;
                 return string.IsNullOrWhiteSpace(candidate) ? string.Empty : candidate.Trim();
             }
@@ -920,6 +936,7 @@ namespace MGT
                 object wrapped = wrapper.Value;
                 if (wrapped is GH_String wrappedString)
                 {
+                    // Handle wrapped GH_String instances by unwrapping first.
                     string candidate = wrappedString.Value;
                     return string.IsNullOrWhiteSpace(candidate) ? string.Empty : candidate.Trim();
                 }
@@ -930,11 +947,13 @@ namespace MGT
 
             if (GH_Convert.ToString(goo, out string converted, GH_Conversion.Both))
             {
+                // Allow Grasshopper to convert other types like numbers.
                 return string.IsNullOrWhiteSpace(converted) ? string.Empty : converted.Trim();
             }
 
             object scriptValue = goo.ScriptVariable();
             string result = Convert.ToString(scriptValue, CultureInfo.InvariantCulture);
+            // Fall back to ScriptVariable for custom goo implementations.
             return string.IsNullOrWhiteSpace(result) ? string.Empty : result.Trim();
         }
 
@@ -947,6 +966,7 @@ namespace MGT
 
             try
             {
+                // Request ETABS to delete the uniform load assignment for the pair.
                 int ret = model.AreaObj.DeleteLoadUniform(
                     areaName ?? string.Empty,
                     loadPattern ?? string.Empty,
