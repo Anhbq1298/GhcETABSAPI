@@ -694,7 +694,7 @@ namespace MGT
                     continue;
                 }
 
-                int ret = sapModel.PointObj.DeletePoint(name);
+                int ret = sapModel.PointObj.DeleteSpecialPoint(name);
                 if (ret == 0)
                 {
                     deleteCount++;
@@ -721,13 +721,13 @@ namespace MGT
             }
 
             int numberItems = 0;
-            string[] objectTypes = null;
+            int[] objectTypes = null;
             string[] objectNames = null;
-            string[] pointNames = null;
+            int[] pointNumbers = null;
 
             try
             {
-                int ret = model.PointObj.GetConnectivity(name, ref numberItems, ref objectTypes, ref objectNames, ref pointNames);
+                int ret = model.PointObj.GetConnectivity(name, ref numberItems, ref objectTypes, ref objectNames, ref pointNumbers);
                 if (ret != 0)
                 {
                     return false;
