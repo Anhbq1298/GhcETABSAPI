@@ -197,7 +197,11 @@ namespace MGT
                 EnsureModelUnlocked(sapModel);
                 HashSet<string> existingNames = TryGetExistingFrameNames(sapModel);
 
-                HashSet<FramePatternKey> baselineCombos = autoRemove ? CollectCombosFromValueTree(baselineTree) : null;
+                // Capture the baseline pairs exactly as they were exported so
+                // removal checks can iterate them in the same order Excel
+                // originally produced.
+                OrderedLookup<FramePatternKey, FramePatternKey> baselineCombos =
+                    autoRemove ? CollectCombosFromValueTree(baselineTree) : null;
                 HashSet<FramePatternKey> desiredCombos = autoRemove ? CollectCombosFromExcel(excelData) : null;
 
                 if (autoRemove && baselineCombos != null && baselineCombos.Count > 0)
@@ -432,11 +436,13 @@ namespace MGT
 
         private static int AutoRemoveMissingCombos(
             cSapModel sapModel,
-            HashSet<FramePatternKey> baselineCombos,
+            OrderedLookup<FramePatternKey, FramePatternKey> baselineCombos,
             HashSet<FramePatternKey> desiredCombos,
             HashSet<string> existingNames,
             IList<string> removalSummaries)
         {
+            // Compare the captured baseline combos against the desired set and
+            // remove any pairs that no longer appear in Excel.
             if (sapModel == null || baselineCombos == null || baselineCombos.Count == 0)
             {
                 return 0;
@@ -446,7 +452,9 @@ namespace MGT
             HashSet<FramePatternKey> attempted = new HashSet<FramePatternKey>();
             int removedCount = 0;
 
-            foreach (FramePatternKey combo in baselineCombos)
+            // Iterate in recorded order to avoid shuffling removals relative to
+            // what users saw in Excel.
+            foreach (FramePatternKey combo in baselineCombos.Entries)
             {
                 if (!attempted.Add(combo))
                 {
@@ -460,6 +468,8 @@ namespace MGT
 
                 if (existingNames != null && !existingNames.Contains(combo.FrameName))
                 {
+                    // Skip deletion attempts when the supporting frame was
+                    // removed from the model altogether.
                     continue;
                 }
 
@@ -482,12 +492,14 @@ namespace MGT
 
         private static HashSet<FramePatternKey> CollectCombosFromExcel(ExcelLoadData data)
         {
+            // Build the set of frame/pattern pairs currently listed in Excel.
             HashSet<FramePatternKey> combos = new HashSet<FramePatternKey>();
             if (data == null)
             {
                 return combos;
             }
 
+            // Translate each Excel row into a de-duplicated frame/pattern pair.
             for (int i = 0; i < data.RowCount; i++)
             {
                 string frame = TrimOrEmpty(data.FrameName[i]);
@@ -504,9 +516,9 @@ namespace MGT
             return combos;
         }
 
-        private static HashSet<FramePatternKey> CollectCombosFromValueTree(GH_Structure<IGH_Goo> tree)
+        private static OrderedLookup<FramePatternKey, FramePatternKey> CollectCombosFromValueTree(GH_Structure<IGH_Goo> tree)
         {
-            HashSet<FramePatternKey> combos = new HashSet<FramePatternKey>();
+            OrderedLookup<FramePatternKey, FramePatternKey> combos = new OrderedLookup<FramePatternKey, FramePatternKey>();
             if (tree == null)
             {
                 return combos;
@@ -523,6 +535,8 @@ namespace MGT
                 return combos;
             }
 
+            // Walk both branches side by side to rebuild the ordered pairs that
+            // came from the Grasshopper data tree.
             int rowCount = Math.Max(frameBranch.Count, patternBranch.Count);
             for (int i = 0; i < rowCount; i++)
             {
@@ -534,7 +548,10 @@ namespace MGT
                     continue;
                 }
 
-                combos.Add(new FramePatternKey(frame, pattern));
+                FramePatternKey key = new FramePatternKey(frame, pattern);
+                // Store both the insertion sequence and keyed lookup so order
+                // sensitive deletions behave deterministically during diff.
+                combos.Add(key, key);
             }
 
             return combos;
@@ -555,6 +572,7 @@ namespace MGT
 
             if (goo is GH_String ghString)
             {
+                // Direct GH_String values expose their text through Value.
                 string candidate = ghString.Value;
                 return string.IsNullOrWhiteSpace(candidate) ? string.Empty : candidate.Trim();
             }
@@ -564,6 +582,7 @@ namespace MGT
                 object wrapped = wrapper.Value;
                 if (wrapped is GH_String wrappedString)
                 {
+                    // Many components wrap GH_String instances; unwrap and trim.
                     string candidate = wrappedString.Value;
                     return string.IsNullOrWhiteSpace(candidate) ? string.Empty : candidate.Trim();
                 }
@@ -574,11 +593,13 @@ namespace MGT
 
             if (GH_Convert.ToString(goo, out string converted, GH_Conversion.Both))
             {
+                // Defer to Grasshopper conversions for numbers and other types.
                 return string.IsNullOrWhiteSpace(converted) ? string.Empty : converted.Trim();
             }
 
             object scriptValue = goo.ScriptVariable();
             string result = Convert.ToString(scriptValue, CultureInfo.InvariantCulture);
+            // ScriptVariable() is the last resort for custom goo objects.
             return string.IsNullOrWhiteSpace(result) ? string.Empty : result.Trim();
         }
 
@@ -591,6 +612,7 @@ namespace MGT
 
             try
             {
+                // Ask ETABS to remove the distributed load assignment.
                 int ret = model.FrameObj.DeleteLoadDistributed(
                     frameName ?? string.Empty,
                     loadPattern ?? string.Empty,

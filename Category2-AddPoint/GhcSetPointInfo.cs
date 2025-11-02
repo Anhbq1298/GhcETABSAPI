@@ -200,6 +200,8 @@ namespace MGT
             out int highlightedCells,
             Action<int, int, string> progress)
         {
+            // Snapshot the worksheet into PointRow records while remembering
+            // which cells differ from the baseline capture.
             highlightedCells = 0;
             List<PointRow> rows = new List<PointRow>();
 
@@ -213,6 +215,8 @@ namespace MGT
 
             try
             {
+                // Run Excel invisibly so we can safely read/annotate the file
+                // without flashing windows at the user.
                 app = new Excel.Application
                 {
                     Visible = false,
@@ -221,6 +225,8 @@ namespace MGT
                 };
 
                 books = app.Workbooks;
+                // Open the workbook directly which lets us recolor cells when
+                // highlighting rows that changed from the baseline snapshot.
                 workbook = books.Open(
                     Filename: workbookPath,
                     UpdateLinks: 0,
@@ -244,6 +250,8 @@ namespace MGT
                         string text = ReadText(headerCell?.Value2);
                         if (!string.Equals(text, expectedHeaders[i], StringComparison.OrdinalIgnoreCase))
                         {
+                            // Abort immediately if someone renamed or moved a
+                            // header; downstream parsing would be unreliable.
                             char columnLetter = (char)('A' + StartColumn + i - 1);
                             throw new InvalidOperationException($"Expected header '{expectedHeaders[i]}' in column {columnLetter}.");
                         }
@@ -258,6 +266,8 @@ namespace MGT
                 int lastRow = Math.Max(StartRow, (usedRange?.Row ?? StartRow) + (usedRange?.Rows?.Count ?? 0) - 1);
                 int totalRows = Math.Max(0, lastRow - StartRow + 1);
 
+                // Surface progress to the component UI so long-running imports
+                // show signs of life.
                 progress?.Invoke(0, totalRows, BuildExcelStatus(0, totalRows));
 
                 for (int rowIndex = 0; rowIndex < totalRows; rowIndex++)
@@ -280,6 +290,8 @@ namespace MGT
 
                             if (baseline.HasData)
                             {
+                                // Paint differences compared to the saved
+                                // baseline so users can spot edits quickly.
                                 bool changed = baseline.IsDifferent(columnIndex, rowIndex, value);
                                 bool colorChanged = UpdateCellColor(cell, changed);
                                 if (colorChanged)
@@ -367,6 +379,8 @@ namespace MGT
                 sheets = workbook.Worksheets;
                 int count = sheets?.Count ?? 0;
 
+                // Iterate using the COM indexer so we can release each
+                // candidate immediately after comparing its name.
                 for (int i = 1; i <= count; i++)
                 {
                     Excel.Worksheet candidate = null;
@@ -404,6 +418,7 @@ namespace MGT
                 return "Reading Excel (0 rows)";
             }
 
+            // Present a friendly status string that reports both count and %.
             int clamped = Math.Min(Math.Max(processed, 0), total);
             double percent = total == 0 ? 0.0 : (clamped / (double)total) * 100.0;
             return $"Reading Excel {clamped} of {total} row(s) ({percent:0.##}%).";
@@ -480,40 +495,40 @@ namespace MGT
 
             int renameCount = 0;
             int moveCount = 0;
+            int deleteCount = 0;
 
+            HashSet<string> namesToKeep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // Walk the Excel rows in order so operations respect the worksheet
+            // ordering and the baseline's recorded indices.
             for (int index = 0; index < rows.Count; index++)
             {
                 PointRow row = rows[index];
                 string desiredName = row.UniqueName?.Trim();
                 string baselineName = baseline.HasData ? baseline.GetUniqueName(index) : string.Empty;
-                string workingName = string.IsNullOrWhiteSpace(baselineName) ? desiredName : baselineName;
+                string workingName = DetermineWorkingName(desiredName, baselineName, existingNames);
                 string rowLabel = $"Row {StartRow + index}";
 
                 if (string.IsNullOrWhiteSpace(desiredName))
                 {
+                    MarkNameForKeep(namesToKeep, baselineName);
                     messages.Add($"{rowLabel}: UniqueName is empty. Skipped.");
                     continue;
                 }
 
-                if (string.IsNullOrWhiteSpace(workingName))
-                {
-                    workingName = desiredName;
-                }
-
-                if (!existingNames.Contains(workingName) && existingNames.Contains(desiredName))
-                {
-                    workingName = desiredName;
-                }
-
                 if (!existingNames.Contains(workingName))
                 {
+                    MarkNameForKeep(namesToKeep, baselineName);
                     messages.Add($"{rowLabel}: Point '{workingName}' not found in ETABS. Skipped.");
                     continue;
                 }
 
                 if (!string.IsNullOrWhiteSpace(baselineName) &&
-                    !string.Equals(desiredName, baselineName, StringComparison.Ordinal))
+                    !string.Equals(desiredName, baselineName, StringComparison.Ordinal) &&
+                    string.Equals(workingName, baselineName, StringComparison.OrdinalIgnoreCase))
                 {
+                    // When names match ignoring case, push the rename through
+                    // ETABS so unique name casing mirrors Excel exactly.
                     int ret = sapModel.PointObj.ChangeName(baselineName, desiredName);
                     if (ret == 0)
                     {
@@ -526,9 +541,10 @@ namespace MGT
                     else
                     {
                         messages.Add($"{rowLabel}: ChangeName failed with code {ret}. Keeping old name '{baselineName}'.");
-                        workingName = baselineName;
                     }
                 }
+
+                MarkNameForKeep(namesToKeep, workingName);
 
                 if (!TryGetPoint(sapModel, workingName, out double currentX, out double currentY, out double currentZ))
                 {
@@ -575,6 +591,8 @@ namespace MGT
                 sapModel.SelectObj.ClearSelection();
             }
 
+            deleteCount += DeleteMissingPoints(sapModel, baseline, namesToKeep, actions, messages, existingNames);
+
             messages.Add($"Processed {rows.Count} row(s).");
             if (renameCount > 0)
             {
@@ -583,6 +601,148 @@ namespace MGT
             if (moveCount > 0)
             {
                 messages.Add($"Moved {moveCount} point(s).");
+            }
+            if (deleteCount > 0)
+            {
+                messages.Add($"Deleted {deleteCount} point(s) removed from Excel.");
+            }
+        }
+
+        private static string DetermineWorkingName(string desiredName, string baselineName, HashSet<string> existingNames)
+        {
+            // Try to use the requested Excel name when ETABS already knows it;
+            // otherwise keep the baseline identifier for downstream deletes.
+            if (!string.IsNullOrWhiteSpace(desiredName) && existingNames.Contains(desiredName))
+            {
+                return desiredName;
+            }
+
+            if (!string.IsNullOrWhiteSpace(baselineName) && existingNames.Contains(baselineName))
+            {
+                // When Excel renamed the point but ETABS still tracks the old
+                // unique name, operate on that baseline identifier.
+                return baselineName;
+            }
+
+            if (!string.IsNullOrWhiteSpace(desiredName))
+            {
+                return desiredName;
+            }
+
+            return baselineName ?? string.Empty;
+        }
+
+        private static void MarkNameForKeep(HashSet<string> namesToKeep, string name)
+        {
+            if (namesToKeep == null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return;
+            }
+
+            namesToKeep.Add(name.Trim());
+        }
+
+        private static int DeleteMissingPoints(
+            cSapModel sapModel,
+            PointBaseline baseline,
+            HashSet<string> namesToKeep,
+            List<string> actions,
+            List<string> messages,
+            HashSet<string> existingNames)
+        {
+            if (sapModel == null || baseline == null || !baseline.HasData)
+            {
+                return 0;
+            }
+
+            int deleteCount = 0;
+
+            foreach (PointBaseline.Entry entry in baseline.Entries)
+            {
+                string name = entry.UniqueName;
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                if (namesToKeep != null && namesToKeep.Contains(name))
+                {
+                    continue;
+                }
+
+                if (!TryGetPoint(sapModel, name, out _, out _, out _))
+                {
+                    continue;
+                }
+
+                if (!TryCheckPointConnectivity(sapModel, name, out bool hasConnectivity))
+                {
+                    messages.Add($"Unable to determine connectivity for '{name}'. Skipped delete.");
+                    MarkNameForKeep(namesToKeep, name);
+                    continue;
+                }
+
+                if (hasConnectivity)
+                {
+                    messages.Add($"Skipped deleting '{name}' because it still has connectivity.");
+                    MarkNameForKeep(namesToKeep, name);
+                    continue;
+                }
+
+                int ret = sapModel.PointObj.DeletePoint(name);
+                if (ret == 0)
+                {
+                    deleteCount++;
+                    actions.Add($"Deleted point '{name}' because it was removed from Excel.");
+                    existingNames?.Remove(name);
+                }
+                else
+                {
+                    messages.Add($"Failed to delete point '{name}' (code {ret}).");
+                    MarkNameForKeep(namesToKeep, name);
+                }
+            }
+
+            return deleteCount;
+        }
+
+        private static bool TryCheckPointConnectivity(cSapModel model, string name, out bool hasConnectivity)
+        {
+            hasConnectivity = false;
+
+            if (model == null || string.IsNullOrWhiteSpace(name))
+            {
+                return false;
+            }
+
+            int numberItems = 0;
+            string[] objectTypes = null;
+            string[] objectNames = null;
+            string[] pointNames = null;
+
+            try
+            {
+                int ret = model.PointObj.GetConnectivity(name, ref numberItems, ref objectTypes, ref objectNames, ref pointNames);
+                if (ret != 0)
+                {
+                    return false;
+                }
+
+                hasConnectivity = numberItems > 0;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                // Arrays are managed; nothing to release.
             }
         }
 
@@ -673,6 +833,7 @@ namespace MGT
 
         private static string ReadText(object value)
         {
+            // Normalize any COM-provided value to a trimmed invariant string.
             if (value == null)
             {
                 return string.Empty;
@@ -684,6 +845,8 @@ namespace MGT
 
         private static double? ReadNullableDouble(object value)
         {
+            // Interpret Excel cell contents as doubles when possible while
+            // keeping empty cells as null.
             if (value == null)
             {
                 return null;
@@ -718,10 +881,10 @@ namespace MGT
 
         private class PointBaseline
         {
-            private readonly List<string> _names = new List<string>();
-            private readonly List<double?> _x = new List<double?>();
-            private readonly List<double?> _y = new List<double?>();
-            private readonly List<double?> _z = new List<double?>();
+            // OrderedLookup preserves the capture sequence from the baseline
+            // tree while still letting us fetch rows by UniqueName instantly.
+            private readonly OrderedLookup<string, Entry> _orderedEntries =
+                new OrderedLookup<string, Entry>(StringComparer.Ordinal);
             private bool _hasData;
 
             private PointBaseline()
@@ -736,24 +899,53 @@ namespace MGT
                 }
 
                 PointBaseline baseline = new PointBaseline();
-                baseline._names.AddRange(ReadStringBranch(tree, 0));
-                baseline._x.AddRange(ReadDoubleBranch(tree, 1));
-                baseline._y.AddRange(ReadDoubleBranch(tree, 2));
-                baseline._z.AddRange(ReadDoubleBranch(tree, 3));
+                List<string> names = new List<string>(ReadStringBranch(tree, 0));
+                List<double?> xValues = new List<double?>(ReadDoubleBranch(tree, 1));
+                List<double?> yValues = new List<double?>(ReadDoubleBranch(tree, 2));
+                List<double?> zValues = new List<double?>(ReadDoubleBranch(tree, 3));
+
+                int rowCount = Math.Max(Math.Max(names.Count, xValues.Count), Math.Max(yValues.Count, zValues.Count));
+                for (int i = 0; i < rowCount; i++)
+                {
+                    string name = i < names.Count ? names[i] ?? string.Empty : string.Empty;
+                    double? x = i < xValues.Count ? xValues[i] : null;
+                    double? y = i < yValues.Count ? yValues[i] : null;
+                    double? z = i < zValues.Count ? zValues[i] : null;
+
+                    Entry entry = new Entry(name ?? string.Empty, x, y, z);
+                    string lookupKey = string.IsNullOrWhiteSpace(entry.UniqueName) ? null : entry.UniqueName;
+                    // Record every row in capture order so surviving points keep
+                    // their original positions when we diff against Excel.
+                    baseline._orderedEntries.Add(lookupKey, entry);
+                }
+
                 baseline._hasData = tree.DataCount > 0;
                 return baseline;
             }
 
             public bool HasData => _hasData;
 
+            public int Count => _orderedEntries.Count;
+
+            public IReadOnlyList<Entry> Entries => _orderedEntries.Entries;
+
             public string GetUniqueName(int index)
             {
-                if (index < 0 || index >= _names.Count)
+                IReadOnlyList<Entry> entries = _orderedEntries.Entries;
+
+                if (index < 0 || index >= entries.Count)
                 {
                     return string.Empty;
                 }
 
-                return _names[index] ?? string.Empty;
+                Entry entry = entries[index];
+                return entry.UniqueName ?? string.Empty;
+            }
+
+            public bool TryGetEntry(string uniqueName, out Entry entry)
+            {
+                string lookupKey = string.IsNullOrWhiteSpace(uniqueName) ? null : uniqueName;
+                return _orderedEntries.TryGetValue(lookupKey, out entry);
             }
 
             public bool IsDifferent(int columnIndex, int rowIndex, object excelValue)
@@ -763,38 +955,44 @@ namespace MGT
                     return false;
                 }
 
+                IReadOnlyList<Entry> entries = _orderedEntries.Entries;
+                Entry entry = rowIndex >= 0 && rowIndex < entries.Count ? entries[rowIndex] : default;
+
                 switch (columnIndex)
                 {
                     case 0:
-                        string oldName = GetUniqueName(rowIndex);
+                        string oldName = entry.UniqueName ?? string.Empty;
                         string newName = ReadText(excelValue);
                         return !string.Equals(oldName, newName, StringComparison.Ordinal);
                     case 1:
-                        return CompareNumber(_x, rowIndex, excelValue);
+                        return CompareNumber(entry.X, excelValue);
                     case 2:
-                        return CompareNumber(_y, rowIndex, excelValue);
+                        return CompareNumber(entry.Y, excelValue);
                     case 3:
-                        return CompareNumber(_z, rowIndex, excelValue);
+                        return CompareNumber(entry.Z, excelValue);
                     default:
                         return false;
                 }
             }
 
-            private static bool CompareNumber(List<double?> baselineValues, int index, object excelValue)
+            private static bool CompareNumber(double? baselineValue, object excelValue)
             {
-                double? baseline = index >= 0 && index < baselineValues.Count ? baselineValues[index] : null;
+                // Evaluate whether the Excel numeric cell diverges from the
+                // baseline while respecting the movement tolerance.
                 double? excel = ReadNullableDouble(excelValue);
 
-                if (baseline.HasValue && excel.HasValue)
+                if (baselineValue.HasValue && excel.HasValue)
                 {
-                    return Math.Abs(baseline.Value - excel.Value) > Tolerance;
+                    return Math.Abs(baselineValue.Value - excel.Value) > Tolerance;
                 }
 
-                return baseline.HasValue != excel.HasValue;
+                return baselineValue.HasValue != excel.HasValue;
             }
 
             private static IEnumerable<string> ReadStringBranch(GH_Structure<IGH_Goo> tree, int index)
             {
+                // Iterate a Grasshopper branch, normalizing each goo entry to a
+                // trimmed string.
                 if (index < 0 || index >= tree.PathCount)
                 {
                     yield break;
@@ -826,6 +1024,7 @@ namespace MGT
 
             private static IEnumerable<double?> ReadDoubleBranch(GH_Structure<IGH_Goo> tree, int index)
             {
+                // Iterate a branch and convert entries into nullable doubles.
                 if (index < 0 || index >= tree.PathCount)
                 {
                     yield break;
@@ -854,6 +1053,7 @@ namespace MGT
                     }
                 }
             }
+            internal readonly record struct Entry(string UniqueName, double? X, double? Y, double? Z);
         }
     }
 }

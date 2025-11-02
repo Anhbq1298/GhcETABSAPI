@@ -232,4 +232,65 @@ namespace MGT
             return $"load patterns ({string.Join(", ", filters)})";
         }
     }
+
+    /// <summary>
+    /// Maintains an insertion-ordered list of entries together with a lookup by key.
+    /// </summary>
+    /// <typeparam name="TKey">Key type used for dictionary lookups.</typeparam>
+    /// <typeparam name="TValue">Value type stored for each entry.</typeparam>
+    internal sealed class OrderedLookup<TKey, TValue>
+    {
+        // Keep an ordered backing list so callers can iterate entries in the
+        // exact sequence they were recorded from Excel/baseline captures.
+        private readonly List<TValue> _entries = new List<TValue>();
+        // Maintain a dictionary side-car to expose O(1) lookups without
+        // disturbing the insertion order stored in _entries.
+        private readonly Dictionary<TKey, TValue> _lookup;
+
+        internal OrderedLookup()
+            : this(EqualityComparer<TKey>.Default)
+        {
+        }
+
+        internal OrderedLookup(IEqualityComparer<TKey> comparer)
+        {
+            _lookup = new Dictionary<TKey, TValue>(comparer ?? EqualityComparer<TKey>.Default);
+        }
+
+        internal int Count => _entries.Count;
+
+        internal IReadOnlyList<TValue> Entries => _entries;
+
+        internal void Add(TKey key, TValue value)
+        {
+            // Always append to the ordered list first; this guarantees
+            // enumeration reflects the original capture order even when the
+            // same key appears multiple times (dictionary ignores duplicates).
+            _entries.Add(value);
+
+            if (key == null)
+            {
+                return;
+            }
+
+            // Only seed the lookup when we see a key for the first time; later
+            // duplicates keep their place in _entries but should not overwrite
+            // the first occurrence used for keyed access.
+            if (!_lookup.ContainsKey(key))
+            {
+                _lookup.Add(key, value);
+            }
+        }
+
+        internal bool TryGetValue(TKey key, out TValue value)
+        {
+            if (key == null)
+            {
+                value = default;
+                return false;
+            }
+
+            return _lookup.TryGetValue(key, out value);
+        }
+    }
 }
