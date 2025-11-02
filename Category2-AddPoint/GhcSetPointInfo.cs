@@ -128,26 +128,42 @@ namespace MGT
                 PointBaseline baseline = PointBaseline.FromTree(baselineTree);
 
                 int highlightedCells;
-                List<PointRow> rows = ReadExcelRows(fullPath, sheetName, baseline, out highlightedCells,
+                List<PointRow> rows = ReadExcelRows(
+                    fullPath,
+                    sheetName,
+                    baseline,
+                    out highlightedCells,
                     (current, total, status) => UiHelpers.UpdateExcelProgressBar(current, total, status));
 
                 valueTree = BuildValueTree(rows);
 
-                EnsureModelUnlocked(sapModel);
-
-                HashSet<string> existingNames = GetPointNames(sapModel);
-                if (existingNames == null)
-                {
-                    throw new InvalidOperationException("Failed to read point names from ETABS.");
-                }
-
-                if (rows.Count == 0)
+                int totalRows = rows.Count;
+                if (totalRows == 0)
                 {
                     messages.Add("Excel sheet contained no data rows.");
                 }
                 else
                 {
-                    ProcessRows(sapModel, rows, baseline, existingNames, actions, messages);
+                    EnsureModelUnlocked(sapModel);
+
+                    HashSet<string> existingNames = GetPointNames(sapModel);
+                    if (existingNames == null)
+                    {
+                        throw new InvalidOperationException("Failed to read point names from ETABS.");
+                    }
+
+                    UiHelpers.UpdateAssignmentProgressBar(0, totalRows, BuildAssignmentStatus(0, totalRows));
+
+                    ProcessRows(
+                        sapModel,
+                        rows,
+                        baseline,
+                        existingNames,
+                        actions,
+                        messages,
+                        (current, total, status) => UiHelpers.UpdateAssignmentProgressBar(current, total, status));
+
+                    UiHelpers.UpdateAssignmentProgressBar(totalRows, totalRows, BuildAssignmentStatus(totalRows, totalRows));
                 }
 
                 if (highlightedCells > 0)
@@ -424,6 +440,18 @@ namespace MGT
             return $"Reading Excel {clamped} of {total} row(s) ({percent:0.##}%).";
         }
 
+        private static string BuildAssignmentStatus(int processed, int total)
+        {
+            if (total <= 0)
+            {
+                return "Updating ETABS points (0 rows)";
+            }
+
+            int clamped = Math.Min(Math.Max(processed, 0), total);
+            double percent = total == 0 ? 0.0 : (clamped / (double)total) * 100.0;
+            return $"Updating ETABS points {clamped} of {total} row(s) ({percent:0.##}%).";
+        }
+
         private static bool UpdateCellColor(Excel.Range cell, bool changed)
         {
             if (cell == null)
@@ -486,7 +514,8 @@ namespace MGT
             PointBaseline baseline,
             HashSet<string> existingNames,
             List<string> actions,
-            List<string> messages)
+            List<string> messages,
+            Action<int, int, string> progress)
         {
             if (sapModel.SelectObj != null)
             {
@@ -496,8 +525,20 @@ namespace MGT
             int renameCount = 0;
             int moveCount = 0;
             int deleteCount = 0;
+            int processed = 0;
+            int total = rows?.Count ?? 0;
 
             HashSet<string> namesToKeep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void AdvanceProgress()
+            {
+                processed++;
+                // Previously we never advanced the assignment-side progress bar when
+                // rows were skipped or bailed out early, so the UI stayed frozen even
+                // though the loop kept working. Publishing the progress after every
+                // row (including skipped ones) keeps the bar in sync with the work.
+                progress?.Invoke(processed, total, BuildAssignmentStatus(processed, total));
+            }
 
             // Walk the Excel rows in order so operations respect the worksheet
             // ordering and the baseline's recorded indices.
@@ -513,6 +554,7 @@ namespace MGT
                 {
                     MarkNameForKeep(namesToKeep, baselineName);
                     messages.Add($"{rowLabel}: UniqueName is empty. Skipped.");
+                    AdvanceProgress();
                     continue;
                 }
 
@@ -520,6 +562,7 @@ namespace MGT
                 {
                     MarkNameForKeep(namesToKeep, baselineName);
                     messages.Add($"{rowLabel}: Point '{workingName}' not found in ETABS. Skipped.");
+                    AdvanceProgress();
                     continue;
                 }
 
@@ -549,6 +592,7 @@ namespace MGT
                 if (!TryGetPoint(sapModel, workingName, out double currentX, out double currentY, out double currentZ))
                 {
                     messages.Add($"{rowLabel}: Unable to read current coordinates for '{workingName}'.");
+                    AdvanceProgress();
                     continue;
                 }
 
@@ -562,6 +606,7 @@ namespace MGT
 
                 if (Math.Abs(dx) < Tolerance && Math.Abs(dy) < Tolerance && Math.Abs(dz) < Tolerance)
                 {
+                    AdvanceProgress();
                     continue;
                 }
 
@@ -569,6 +614,7 @@ namespace MGT
                 if (selectRet != 0)
                 {
                     messages.Add($"{rowLabel}: Failed to select '{workingName}' (code {selectRet}).");
+                    AdvanceProgress();
                     continue;
                 }
 
@@ -584,6 +630,8 @@ namespace MGT
                 {
                     messages.Add($"{rowLabel}: Move failed for '{workingName}' (code {moveRet}).");
                 }
+
+                AdvanceProgress();
             }
 
             if (sapModel.SelectObj != null)
