@@ -9,7 +9,6 @@ using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
 using static MGT.ComponentShared;
-using Excel = Microsoft.Office.Interop.Excel;
 
 namespace MGT
 {
@@ -20,7 +19,7 @@ namespace MGT
     ///
     /// Notes:
     /// - Create-if-missing is ALWAYS ON (no input pin).
-    /// - Excel progress uses candidate rows via End(xlUp) and the reader does the final tick.
+    /// - Excel progress uses the shared ExcelHelpers reader and reports precise progress updates.
     /// - Assignment progress updates after each processed row and final tick hits 100%.
     /// </summary>
     public class GhcSetPointInfo : GH_Component
@@ -29,9 +28,7 @@ namespace MGT
         private const string DefaultSheet = "Point Info";  // Default worksheet name
         private const int StartColumn = 2;                 // Column B
         private const int StartRow = 2;                    // Data starts at row 2 (row 1 = headers)
-        private const int ColumnCount = 4;                 // Columns: UniqueName, X, Y, Z
         private const double Tolerance = 1e-6;             // Movement tolerance (in model units)
-        private const int ExcelChunkSize = 2000;           // Candidate rows per block read
 
         // ======= Sticky replay (non-rising) =======
         private bool _lastRun;
@@ -131,7 +128,7 @@ namespace MGT
                 // ===== Read Excel (streamed; reader handles the final tick) =====
                 PointBaseline baseline = PointBaseline.FromTree(baselineTree);
 
-                List<PointRow> rows = ReadExcelRows_ChunkedStreaming(
+                List<PointRow> rows = ReadExcelSheet(
                     fullPath,
                     sheetName,
                     (current, total, status) => UiHelpers.UpdateExcelProgressBar(current, total, status));
@@ -203,199 +200,50 @@ namespace MGT
             }
         }
 
-        /// <summary>
-        /// STREAMED EXCEL READER:
-        /// - Compute candidateCount via End(xlUp) across B..E.
-        /// - Read blocks of rows (object[,]) to reduce COM calls.
-        /// - Advance progress for every candidate row (incl. blanks) so the bar
-        ///   runs smoothly and exactly hits 100%.
-        /// - Performs the final tick: progress(candidateCount, candidateCount).
-        /// </summary>
-        private static List<PointRow> ReadExcelRows_ChunkedStreaming(
+        private static List<PointRow> ReadExcelSheet(
             string workbookPath,
             string sheetName,
             Action<int, int, string> progress)
         {
-            var rows = new List<PointRow>();
+            bool useDefaultSheet = string.IsNullOrWhiteSpace(sheetName);
+            string targetSheet = useDefaultSheet ? DefaultSheet : sheetName;
 
-            Excel.Application app = null;
-            Excel.Workbooks books = null;
-            Excel.Workbook workbook = null;
-            Excel.Worksheet sheet = null;
-
-            try
+            var profile = new ExcelHelpers.ExcelSheetProfile
             {
-                app = new Excel.Application
-                {
-                    Visible = false,
-                    DisplayAlerts = false,
-                    UserControl = false
-                };
+                ExpectedSheetName = useDefaultSheet ? DefaultSheet : null,
+                StartColumn = StartColumn,
+                ExpectedHeaders = new[] { "UniqueName", "X", "Y", "Z" }
+            };
 
-                books = app.Workbooks;
-                workbook = books.Open(
-                    Filename: workbookPath,
-                    UpdateLinks: 0,
-                    ReadOnly: true,
-                    IgnoreReadOnlyRecommended: true,
-                    AddToMru: false);
+            ExcelHelpers.ExcelSheetReadResult result = ExcelHelpers.ReadSheet(
+                workbookPath,
+                targetSheet,
+                profile,
+                progress);
 
-                sheet = ExcelHelpers.FindWorksheet(workbook, sheetName);
-                if (sheet == null)
-                    throw new InvalidOperationException($"Worksheet '{sheetName}' not found.");
+            var rows = new List<PointRow>(result.Rows.Count);
 
-                // Validate headers once
-                string[] expectedHeaders = { "UniqueName", "X", "Y", "Z" };
-                for (int i = 0; i < ColumnCount; i++)
-                {
-                    Excel.Range h = null;
-                    try
-                    {
-                        h = sheet.Cells[StartRow - 1, StartColumn + i];
-                        string got = ReadText(h?.Value2);
-                        if (!string.Equals(got, expectedHeaders[i], StringComparison.OrdinalIgnoreCase))
-                        {
-                            char col = (char)('A' + StartColumn + i - 1);
-                            throw new InvalidOperationException($"Expected header '{expectedHeaders[i]}' in column {col}.");
-                        }
-                    }
-                    finally { ExcelHelpers.ReleaseCom(h); }
-                }
-
-                // Determine last candidate row by taking max End(xlUp) across B..E
-                int lastRowB = sheet.Cells[sheet.Rows.Count, StartColumn + 0].End(Excel.XlDirection.xlUp).Row;
-                int lastRowC = sheet.Cells[sheet.Rows.Count, StartColumn + 1].End(Excel.XlDirection.xlUp).Row;
-                int lastRowD = sheet.Cells[sheet.Rows.Count, StartColumn + 2].End(Excel.XlDirection.xlUp).Row;
-                int lastRowE = sheet.Cells[sheet.Rows.Count, StartColumn + 3].End(Excel.XlDirection.xlUp).Row;
-                int lastRow = Math.Max(StartRow, Math.Max(Math.Max(lastRowB, lastRowC), Math.Max(lastRowD, lastRowE)));
-                int candidateCount = Math.Max(0, lastRow - StartRow + 1);
-
-                // Surface progress to the component UI so long-running imports
-                // show signs of life.
-                progress?.Invoke(0, totalRows, BuildExcelStatus(0, totalRows));
-
-                if (candidateCount == 0)
-                {
-                    int excelRow = StartRow + rowIndex;
-                    progress?.Invoke(rowIndex, totalRows, BuildExcelStatus(rowIndex, totalRows));
-
-                int processedCandidates = 0;
-
-                // Stream by chunks to keep UI responsive and COM calls low
-                for (int chunkStartOffset = 0; chunkStartOffset < candidateCount; chunkStartOffset += ExcelChunkSize)
-                {
-                    int thisCount = Math.Min(ExcelChunkSize, candidateCount - chunkStartOffset);
-                    int r1 = StartRow + chunkStartOffset;
-                    int r2 = r1 + thisCount - 1;
-
-                    Excel.Range dataRange = sheet.Range[
-                        sheet.Cells[r1, StartColumn],
-                        sheet.Cells[r2, StartColumn + ColumnCount - 1]
-                    ];
-
-                    object[,] data = (object[,])dataRange.Value2;
-                    ExcelHelpers.ReleaseCom(dataRange);
-
-                    // Iterate rows inside this chunk
-                    for (int i = 1; i <= thisCount; i++)
-                    {
-                        string name = ReadText(data[i, 1]);
-                        double? x = ReadNullableDouble(data[i, 2]);
-                        double? y = ReadNullableDouble(data[i, 3]);
-                        double? z = ReadNullableDouble(data[i, 4]);
-
-                        bool allEmpty = string.IsNullOrWhiteSpace(name) && x == null && y == null && z == null;
-                        if (!allEmpty)
-                        {
-                            rows.Add(new PointRow { UniqueName = name, X = x, Y = y, Z = z });
-                        }
-
-                        processedCandidates++;
-                        progress?.Invoke(processedCandidates, candidateCount, BuildExcelStatus(processedCandidates, candidateCount));
-                    }
-                }
-
-                progress?.Invoke(totalRows, totalRows, BuildExcelStatus(totalRows, totalRows));
-
-                if (workbookModified)
-                {
-                    workbook.Save();
-                }
-            }
-            finally
+            foreach (object[] row in result.Rows)
             {
-                try { workbook?.Close(false); } catch { }
-                ExcelHelpers.ReleaseCom(sheet);
-                ExcelHelpers.ReleaseCom(workbook);
-                ExcelHelpers.ReleaseCom(books);
-                if (app != null)
+                string name = ReadText(row[0]);
+                double? x = ReadNullableDouble(row[1]);
+                double? y = ReadNullableDouble(row[2]);
+                double? z = ReadNullableDouble(row[3]);
+
+                bool allEmpty = string.IsNullOrWhiteSpace(name) && x == null && y == null && z == null;
+                if (allEmpty)
+                    continue;
+
+                rows.Add(new PointRow
                 {
-                    try { app.Quit(); } catch { }
-                    ExcelHelpers.ReleaseCom(app);
-                }
+                    UniqueName = name,
+                    X = x,
+                    Y = y,
+                    Z = z
+                });
             }
 
             return rows;
-        }
-
-        private static Excel.Worksheet FindWorksheet(Excel.Workbook workbook, string sheetName)
-        {
-            if (workbook == null)
-            {
-                return null;
-            }
-
-            Excel.Sheets sheets = null;
-            Excel.Worksheet target = null;
-
-            try
-            {
-                sheets = workbook.Worksheets;
-                int count = sheets?.Count ?? 0;
-
-                // Iterate using the COM indexer so we can release each
-                // candidate immediately after comparing its name.
-                for (int i = 1; i <= count; i++)
-                {
-                    Excel.Worksheet candidate = null;
-                    try
-                    {
-                        candidate = sheets[i] as Excel.Worksheet;
-                        if (candidate != null && string.Equals(candidate.Name, sheetName, StringComparison.OrdinalIgnoreCase))
-                        {
-                            target = candidate;
-                            candidate = null; // Ownership transferred to caller.
-                            break;
-                        }
-                    }
-                    finally
-                    {
-                        if (candidate != null)
-                        {
-                            ExcelHelpers.ReleaseCom(candidate);
-                        }
-                    }
-                }
-            }
-            finally
-            {
-                ExcelHelpers.ReleaseCom(sheets);
-            }
-
-            return target;
-        }
-
-        private static string BuildExcelStatus(int processed, int total)
-        {
-            if (total <= 0)
-            {
-                return "Reading Excel (0 rows)";
-            }
-
-            // Present a friendly status string that reports both count and %.
-            int clamped = Math.Min(Math.Max(processed, 0), total);
-            double percent = total == 0 ? 0.0 : (clamped / (double)total) * 100.0;
-            return $"Reading Excel {clamped} of {total} row(s) ({percent:0.##}%).";
         }
 
         private static string BuildAssignmentStatus(int processed, int total)
