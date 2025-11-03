@@ -12,10 +12,39 @@ using Microsoft.VisualBasic;
 
 namespace MGT
 {
+    /// <summary>
+    /// Excel COM helpers for .NET 8 (net8.0-windows).
+    /// - No Microsoft.Office.Core reference required.
+    /// - Hide Ribbon via Excel4 macro; Zoom-to-selection via reflection (ExecuteMso).
+    /// - Kiosk view (no Table): focus a range, hide chrome, keep sheet tabs, no maximize by default.
+    /// - Bring to front supported.
+    /// </summary>
     internal class ExcelHelpers
     {
         // Prevent overlapping COM calls in multi-threaded contexts
         private static readonly object _excelLock = new object();
+
+        // -------- UI STATE (INSIDE THIS CLASS) --------
+        /// <summary>Snapshot of Excel UI state so we can restore later.</summary>
+        internal class UiState
+        {
+            public bool? DisplayFullScreen;
+            public bool? DisplayFormulaBar;
+            public bool? DisplayStatusBar;
+            public bool? ScreenUpdating;
+            public bool? EnableEvents;
+
+            // Per-window toggles
+            public bool? DisplayGridlines;
+            public bool? DisplayHeadings;
+            public bool? DisplayHorizontalScrollBar;
+            public bool? DisplayVerticalScrollBar;
+            public bool? DisplayWorkbookTabs;
+            public int? Zoom;
+        }
+        // ----------------------------------------------
+
+        #region Path / COM helpers
 
         /// <summary>
         /// Convert a relative path to full path using AppDomain.BaseDirectory.
@@ -123,9 +152,13 @@ namespace MGT
             catch { /* ignore */ }
         }
 
+        #endregion
+
+        #region Attach / Open / Close Excel
+
         /// <summary>
         /// Force-restart Excel: close any running instance, then open workbook.
-        /// If 'filePathOrRelative' is null/empty, uses "templateExcel/ETABS_DB_Template.xlsx".
+        /// If 'filePathOrRelative' is null/empty, creates a temp workbook (temp.xlsx).
         /// Returns true if a new Excel Application was created (always true on success here).
         /// </summary>
         internal static bool AttachOrOpenWorkbook(
@@ -133,7 +166,9 @@ namespace MGT
             out Excel.Workbook wb,
             string filePathOrRelative,
             bool visible = true,
-            bool readOnly = false)
+            bool readOnly = false,
+            bool maximizeWindow = false,   // default false (do not maximize)
+            bool bringToFront = true)      // default true (bring window to front)
         {
             lock (_excelLock)
             {
@@ -149,13 +184,9 @@ namespace MGT
                     if (!File.Exists(fullPath)) return false;
                 }
 
-                // 0) Close any running Excel for clean start
+                // 0) Close any running Excel for a clean start
                 var running = TryGetRunningExcelApplication();
-                if (running != null)
-                {
-                    SafeQuitExcel(running);
-                    running = null;
-                }
+                if (running != null) SafeQuitExcel(running);
 
                 // 1) Create fresh Excel & open workbook (no prompts)
                 bool createdApplication = false;
@@ -177,26 +208,18 @@ namespace MGT
                             string tempFileName = "temp.xlsx";
                             string tempFullPath = Path.Combine(tempDirectory, tempFileName);
 
-                            try
-                            {
-                                if (File.Exists(tempFullPath)) File.Delete(tempFullPath);
-                            }
-                            catch { }
-
+                            try { if (File.Exists(tempFullPath)) File.Delete(tempFullPath); } catch { }
                             wb.SaveAs(tempFullPath, Excel.XlFileFormat.xlOpenXMLWorkbook);
+
                             try
                             {
                                 Excel.Window window = null;
                                 try
                                 {
                                     window = app.ActiveWindow;
-                                    if (window != null)
-                                        window.Caption = "temp";
+                                    if (window != null) window.Caption = "temp";
                                 }
-                                finally
-                                {
-                                    if (window != null) ReleaseCom(window);
-                                }
+                                finally { if (window != null) ReleaseCom(window); }
                             }
                             catch { }
                         }
@@ -233,12 +256,14 @@ namespace MGT
                         try { app.DisplayAlerts = prevAlerts; } catch { }
                     }
 
-                    // 2) UI polish: show & MAXIMIZE
+                    // 2) UI: show; no maximize unless asked; bring to front if requested
                     try
                     {
                         if (visible) { app.Visible = true; app.UserControl = true; }
                         wb.Activate();
-                        MaximizeExcelWindow(app);   // <<-- maximize Excel window(s)
+
+                        if (maximizeWindow) MaximizeExcelWindow(app);
+                        if (bringToFront) BringExcelToFront(app);
                     }
                     catch { /* no-op */ }
 
@@ -257,6 +282,38 @@ namespace MGT
         }
 
         /// <summary>
+        /// Bring the Excel main window to the foreground (no maximize).
+        /// </summary>
+        private static void BringExcelToFront(Excel.Application app)
+        {
+            if (app == null) return;
+            try
+            {
+                // Make sure Excel is visible and the workbook window is active
+                try { app.Visible = true; app.UserControl = true; } catch { }
+                try
+                {
+                    var aw = app.ActiveWindow;
+                    if (aw != null)
+                    {
+                        try { aw.Activate(); } catch { }
+                        ReleaseCom(aw);
+                    }
+                }
+                catch { }
+
+                // Bring main HWND to front
+                IntPtr hwnd = (IntPtr)app.Hwnd;
+                if (hwnd != IntPtr.Zero)
+                {
+                    ShowWindow(hwnd, SW_RESTORE);
+                    SetForegroundWindow(hwnd);
+                }
+            }
+            catch { /* no-op */ }
+        }
+
+        /// <summary>
         /// Maximize Excel UI window(s) reliably (MDI/SDI): Application & ActiveWindow + Win32.
         /// </summary>
         private static void MaximizeExcelWindow(Excel.Application app)
@@ -264,7 +321,6 @@ namespace MGT
             if (app == null) return;
             try
             {
-                // Excel-side maximize (covers MDI/SDI)
                 try { app.WindowState = Excel.XlWindowState.xlMaximized; } catch { }
                 Excel.Window aw = null;
                 try
@@ -281,7 +337,6 @@ namespace MGT
                     if (aw != null) ReleaseCom(aw);
                 }
 
-                // Win32 ensure top-level window is maximized and foreground
                 IntPtr hwnd = (IntPtr)app.Hwnd;
                 if (hwnd != IntPtr.Zero)
                 {
@@ -438,7 +493,7 @@ namespace MGT
         [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
         private static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
 
-        [DllImport("user32.dll", SetLastError = true)]
+        [DllImport("user232.dll", SetLastError = true)]
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
         [DllImport("user32.dll", SetLastError = true)]
@@ -488,6 +543,10 @@ namespace MGT
             }
             return false;
         }
+
+        #endregion
+
+        #region Worksheet helpers
 
         /// <summary>
         /// Get a worksheet by name; create if missing. Returns a WS RCW owned by the caller.
@@ -568,9 +627,199 @@ namespace MGT
             return row > 0 && col > 0;
         }
 
+        private static string ColumnNumberToLetters(int column)
+        {
+            if (column < 1) column = 1;
+
+            StringBuilder builder = new StringBuilder();
+            int dividend = column;
+            while (dividend > 0)
+            {
+                int modulo = (dividend - 1) % 26;
+                builder.Insert(0, (char)('A' + modulo));
+                dividend = (dividend - modulo) / 26;
+            }
+            return builder.Length > 0 ? builder.ToString() : "A";
+        }
+
+        #endregion
+
+        #region Ribbon / CommandBars (reflection)
+
+        /// <summary>
+        /// Late-bind Application.CommandBars.ExecuteMso(controlId) to avoid referencing office.dll.
+        /// Works on .NET 8 without Microsoft.Office.Core.
+        /// </summary>
+        private static void TryExecuteMso(object application, string controlId)
+        {
+            try
+            {
+                if (application == null || string.IsNullOrWhiteSpace(controlId)) return;
+
+                // object cmdBars = application.CommandBars;
+                var cmdBars = application.GetType().InvokeMember(
+                    "CommandBars",
+                    BindingFlags.GetProperty,
+                    binder: null,
+                    target: application,
+                    args: null);
+
+                if (cmdBars == null) return;
+
+                // cmdBars.ExecuteMso(controlId);
+                cmdBars.GetType().InvokeMember(
+                    "ExecuteMso",
+                    BindingFlags.InvokeMethod,
+                    binder: null,
+                    target: cmdBars,
+                    args: new object[] { controlId });
+            }
+            catch
+            {
+                // Swallow: ExecuteMso may not exist in some Office builds or policies.
+            }
+        }
+
+        #endregion
+
+        #region Kiosk view (NO Table) + UI restore
+
+        /// <summary>
+        /// In-place "kiosk" view WITHOUT converting to ListObject:
+        /// - Selects the given dataRange
+        /// - Zoom-to-selection (via ExecuteMso reflection), fallback Zoom
+        /// - Hides Ribbon, FormulaBar, StatusBar, gridlines, headings, scrollbars
+        /// - Keeps sheet tabs visible
+        /// - Does NOT maximize; FullScreen only if requested (default false)
+        /// Returns captured UiState for optional restore.
+        /// </summary>
+        internal static UiState ApplyKioskViewNoTable(
+            Excel.Application app,
+            Excel.Worksheet ws,
+            Excel.Range dataRange,
+            bool makeFullScreen = false) // default false
+        {
+            if (app == null || ws == null || dataRange == null) return null;
+
+            // Select focus range
+            try { dataRange.Select(); } catch { }
+
+            // Capture current UI state
+            UiState state = new UiState();
+            try
+            {
+                state.DisplayFullScreen = app.DisplayFullScreen;
+                state.DisplayFormulaBar = app.DisplayFormulaBar;
+                state.DisplayStatusBar = app.DisplayStatusBar;
+                state.ScreenUpdating = app.ScreenUpdating;
+                state.EnableEvents = app.EnableEvents;
+
+                var win = app.ActiveWindow;
+                if (win != null)
+                {
+                    state.DisplayGridlines = win.DisplayGridlines;
+                    state.DisplayHeadings = win.DisplayHeadings;
+                    state.DisplayHorizontalScrollBar = win.DisplayHorizontalScrollBar;
+                    state.DisplayVerticalScrollBar = win.DisplayVerticalScrollBar;
+                    state.DisplayWorkbookTabs = win.DisplayWorkbookTabs;
+                    state.Zoom = win.Zoom is int z ? z : (int?)null;
+                }
+            }
+            catch { }
+
+            // Hide chrome + zoom to selection
+            try
+            {
+                app.ScreenUpdating = true;
+                app.EnableEvents = false;
+
+                // Hide Ribbon (Excel4 macro)
+                try { app.ExecuteExcel4Macro(@"SHOW.TOOLBAR(""Ribbon"",False)"); } catch { }
+
+                app.DisplayFormulaBar = false;
+                app.DisplayStatusBar = false;
+
+                var win = app.ActiveWindow;
+                if (win != null)
+                {
+                    // Hide most chrome but KEEP sheet tabs
+                    win.DisplayGridlines = false;
+                    win.DisplayHeadings = false;
+                    win.DisplayHorizontalScrollBar = false;
+                    win.DisplayVerticalScrollBar = false;
+                    win.DisplayWorkbookTabs = true; // keep visible
+
+                    // Zoom-to-selection without office.dll
+                    TryExecuteMso(app, "ZoomToSelection");
+
+                    // Fallback zoom if ExecuteMso not available
+                    try { if (!(win.Zoom is int)) win.Zoom = 120; } catch { }
+                }
+
+                // Do NOT force FullScreen unless requested
+                app.DisplayFullScreen = makeFullScreen;
+            }
+            catch { }
+            finally
+            {
+                try { app.EnableEvents = true; } catch { }
+            }
+
+            // Scroll to top-left of range
+            try
+            {
+                var win = app.ActiveWindow;
+                if (win != null)
+                {
+                    win.ScrollRow = dataRange.Row;
+                    win.ScrollColumn = dataRange.Column;
+                }
+            }
+            catch { }
+
+            return state;
+        }
+
+        /// <summary>
+        /// Restore Excel UI back from kiosk mode and show Ribbon again.
+        /// </summary>
+        internal static void RestoreUi(Excel.Application app, UiState state)
+        {
+            if (app == null || state == null) return;
+
+            try { app.ScreenUpdating = state.ScreenUpdating ?? true; } catch { }
+            try { app.EnableEvents = state.EnableEvents ?? true; } catch { }
+            try { app.DisplayFullScreen = state.DisplayFullScreen ?? false; } catch { }
+            try { app.DisplayFormulaBar = state.DisplayFormulaBar ?? true; } catch { }
+            try { app.DisplayStatusBar = state.DisplayStatusBar ?? true; } catch { }
+
+            // Show Ribbon back
+            try { app.ExecuteExcel4Macro(@"SHOW.TOOLBAR(""Ribbon"",True)"); } catch { }
+
+            try
+            {
+                var win = app.ActiveWindow;
+                if (win != null)
+                {
+                    if (state.DisplayGridlines != null) win.DisplayGridlines = state.DisplayGridlines.Value;
+                    if (state.DisplayHeadings != null) win.DisplayHeadings = state.DisplayHeadings.Value;
+                    if (state.DisplayHorizontalScrollBar != null) win.DisplayHorizontalScrollBar = state.DisplayHorizontalScrollBar.Value;
+                    if (state.DisplayVerticalScrollBar != null) win.DisplayVerticalScrollBar = state.DisplayVerticalScrollBar.Value;
+                    if (state.DisplayWorkbookTabs != null) win.DisplayWorkbookTabs = state.DisplayWorkbookTabs.Value;
+                    if (state.Zoom != null) win.Zoom = state.Zoom.Value;
+                }
+            }
+            catch { }
+        }
+
+        #endregion
+
+        #region Write API (Dictionary -> Worksheet)
+
         /// <summary>
         /// Write data into a worksheet starting at (startRow,startColumn) or 'startAddress' (A1).
-        /// Bold header row; activate sheet; focus starting cell.
+        /// Bold header row. Optionally clear only the target block. Optionally switch to a kiosk
+        /// "range-only" view (hidden Ribbon/UI but keep sheet tabs). No Table/ListObject involved.
         /// </summary>
         internal static string WriteDictionaryToWorksheet(
             IDictionary<string, List<object>> data,
@@ -582,20 +831,27 @@ namespace MGT
             int startColumn,
             string startAddress,
             bool saveAfterWrite,
-            bool readOnly)
+            bool readOnly,
+            // ---- Optional controls ----
+            bool clearTargetBlockBeforeWrite = true,
+            bool applyKioskView = true,     // show clean view
+            bool makeFullScreen = false,    // keep normal window frame by default
+            bool maximizeWindow = false,    // do NOT maximize by default
+            bool bringToFront = true        // bring Excel to foreground after write
+        )
         {
             if (data == null || data.Count == 0) return "Dictionary is empty.";
             if (wb == null) return "Workbook is null.";
             if (string.IsNullOrWhiteSpace(worksheetName)) worksheetName = "Sheet1";
 
             Excel.Worksheet ws = null;
-            Excel.Range range = null, topLeft = null, bottomRight = null;
+            Excel.Range topLeft = null, bottomRight = null, fullBlock = null;
             Excel.Range headerRight = null, headerRow = null;
-            Excel.Range lastUsed = null, sheetEnd = null, clearRange = null;
             Excel.Range dataRange = null;
 
             try
             {
+                // Resolve start address if provided
                 if (!string.IsNullOrWhiteSpace(startAddress) &&
                     TryParseA1Address(startAddress, out int r, out int c))
                 {
@@ -606,20 +862,7 @@ namespace MGT
                 ws = GetOrCreateWorksheet(wb, worksheetName);
                 if (ws == null) return "Failed to access worksheet.";
 
-                // --- NEW: normalize start and clear contents from start → end ---
-                startRow = Math.Max(1, startRow);
-                startColumn = Math.Max(1, startColumn);
-                topLeft = (Excel.Range)ws.Cells[startRow, startColumn];
-
-                // Force Excel to update UsedRange, then try LastCell
-                try { var _ = ws.UsedRange; } catch { }
-                try { lastUsed = ws.Cells.SpecialCells(Excel.XlCellType.xlCellTypeLastCell) as Excel.Range; } catch { lastUsed = null; }
-                sheetEnd = lastUsed ?? (Excel.Range)ws.Cells[ws.Rows.Count, ws.Columns.Count];
-
-                clearRange = ws.Range[topLeft, sheetEnd];
-                try { clearRange.ClearContents(); } catch { /* ignore */ }
-                // --- END NEW ---
-
+                // Build column keys respecting explicit order first
                 var columnKeys = new List<string>();
                 if (columnOrder != null && columnOrder.Count > 0)
                     columnKeys.AddRange(columnOrder);
@@ -629,33 +872,49 @@ namespace MGT
                 int colCount = columnKeys.Count;
                 if (colCount == 0) return "Dictionary is empty.";
 
+                // Max rows among branches
                 int maxRows = 0;
                 foreach (var k in columnKeys)
                     if (data.TryGetValue(k, out var lst) && lst != null && lst.Count > maxRows)
                         maxRows = lst.Count;
 
-                int totalRows = Math.Max(1, maxRows + 1); // +1 header
+                // Total rows = header (1) + data
+                int totalRows = Math.Max(1, maxRows + 1);
+
+                // Prepare 2D array [rows, cols]
                 var values = new object[totalRows, colCount];
 
-                for ( c = 0; c < colCount; c++)
+                for (int c2 = 0; c2 < colCount; c2++)
                 {
-                    string key = columnKeys[c] ?? string.Empty;
-                    string headerLabel = (headers != null && c < headers.Count && !string.IsNullOrWhiteSpace(headers[c]))
-                        ? headers[c]
+                    string key = columnKeys[c2] ?? string.Empty;
+                    string headerLabel = (headers != null && c2 < headers.Count && !string.IsNullOrWhiteSpace(headers[c2]))
+                        ? headers[c2]
                         : key;
 
-                    values[0, c] = headerLabel ?? string.Empty;
+                    values[0, c2] = headerLabel ?? string.Empty;
 
                     if (!data.TryGetValue(key, out var branch) || branch == null) continue;
                     for (int r2 = 0; r2 < branch.Count; r2++)
-                        values[r2 + 1, c] = branch[r2];
+                        values[r2 + 1, c2] = branch[r2];
                 }
 
+                // Target block: exactly header + data (focus area)
+                startRow = Math.Max(1, startRow);
+                startColumn = Math.Max(1, startColumn);
+                topLeft = (Excel.Range)ws.Cells[startRow, startColumn];
                 bottomRight = (Excel.Range)ws.Cells[startRow + totalRows - 1, startColumn + colCount - 1];
-                range = ws.Range[topLeft, bottomRight];
-                range.Value2 = values;
+                fullBlock = ws.Range[topLeft, bottomRight];
 
-                //Header formatting (bold + light blue)
+                // Optional: clear ONLY the target block
+                if (clearTargetBlockBeforeWrite)
+                {
+                    try { fullBlock.Clear(); } catch { /* ignore */ }
+                }
+
+                // Write values
+                fullBlock.Value2 = values;
+
+                // Header formatting (bold + light blue)
                 try
                 {
                     headerRight = (Excel.Range)ws.Cells[startRow, startColumn + colCount - 1];
@@ -673,22 +932,33 @@ namespace MGT
                     ReleaseCom(headerRight);
                 }
 
-                //Ensure ONLY header is formatted → clear formats on data rows
+                // Ensure ONLY header is formatted → clear formats on data rows
                 if (totalRows > 1)
                 {
                     dataRange = ws.Range[ws.Cells[startRow + 1, startColumn], bottomRight];
                     try { dataRange.ClearFormats(); } catch { /* ignore */ }
                 }
 
-                // Activate & maximize, focus starting cell
+                // Activate sheet; optional maximize; optional bring-to-front
                 try
                 {
                     ws.Activate();
-                    MaximizeExcelWindow(ws.Application);
+                    if (maximizeWindow) MaximizeExcelWindow(ws.Application); // opt-in
                     try { ws.Application.Goto(topLeft, true); } catch { }
                     try { topLeft.Select(); } catch { }
+                    if (bringToFront) BringExcelToFront(ws.Application);
                 }
                 catch { }
+
+                // Kiosk view without table (keep sheet tabs; optional fullscreen)
+                if (applyKioskView)
+                {
+                    try
+                    {
+                        ApplyKioskViewNoTable(ws.Application, ws, fullBlock, makeFullScreen);
+                    }
+                    catch { /* degrade gracefully */ }
+                }
 
                 if (saveAfterWrite && !readOnly)
                 {
@@ -701,8 +971,15 @@ namespace MGT
                     : ColumnNumberToLetters(startColumn) + Math.Max(1, startRow).ToString(CultureInfo.InvariantCulture);
 
                 return string.Format(CultureInfo.InvariantCulture,
-                    "Cleared from {0} to sheet end, then wrote {1} columns × {2} rows to '{3}' starting at {0}; header bolded.",
-                    startLabel, colCount, totalRows, wsName);
+                    "Wrote {0} columns × {1} rows to '{2}' starting at {3}; header bolded (kiosk: {4}, fullscreen: {5}, maximized: {6}, front: {7}).",
+                    colCount,
+                    totalRows,
+                    wsName,
+                    startLabel,
+                    applyKioskView ? "on" : "off",
+                    makeFullScreen ? "on" : "off",
+                    maximizeWindow ? "on" : "off",
+                    bringToFront ? "on" : "off");
             }
             catch (Exception ex)
             {
@@ -710,30 +987,14 @@ namespace MGT
             }
             finally
             {
-                ReleaseCom(clearRange);
-                ReleaseCom(sheetEnd);
-                ReleaseCom(lastUsed);
-                ReleaseCom(range);
+                ReleaseCom(dataRange);
+                ReleaseCom(fullBlock);
                 ReleaseCom(topLeft);
                 ReleaseCom(bottomRight);
-                ReleaseCom(dataRange);
                 ReleaseCom(ws);
             }
         }
 
-        private static string ColumnNumberToLetters(int column)
-        {
-            if (column < 1) column = 1;
-
-            StringBuilder builder = new StringBuilder();
-            int dividend = column;
-            while (dividend > 0)
-            {
-                int modulo = (dividend - 1) % 26;
-                builder.Insert(0, (char)('A' + modulo));
-                dividend = (dividend - modulo) / 26;
-            }
-            return builder.Length > 0 ? builder.ToString() : "A";
-        }
+        #endregion
     }
 }
