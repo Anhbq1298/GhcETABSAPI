@@ -410,42 +410,6 @@ namespace MGT
             return $"Updating ETABS points {clamped} of {total} row(s) ({percent:0.##}%).";
         }
 
-        private static bool UpdateCellColor(Excel.Range cell, bool changed)
-        {
-            if (cell == null)
-            {
-                return false;
-            }
-
-            Excel.Interior interior = null;
-            try
-            {
-                interior = cell.Interior;
-                if (interior == null)
-                {
-                    return false;
-                }
-
-                int targetColor = changed ? Grey : White;
-                interior.Pattern = Excel.XlPattern.xlPatternSolid;
-                interior.PatternColorIndex = Excel.XlColorIndex.xlColorIndexAutomatic;
-
-                object current = interior.Color;
-                int currentInt = current is double d ? Convert.ToInt32(d) : current is int i ? i : -1;
-                if (currentInt == targetColor)
-                {
-                    return false;
-                }
-
-                interior.Color = targetColor;
-                return true;
-            }
-            finally
-            {
-                ExcelHelpers.ReleaseCom(interior);
-            }
-        }
-
         private static GH_Structure<GH_ObjectWrapper> BuildValueTree(List<PointRow> rows)
         {
             var tree = new GH_Structure<GH_ObjectWrapper>();
