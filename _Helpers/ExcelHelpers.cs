@@ -67,6 +67,78 @@ namespace MGT
             }
         }
 
+        internal static string TrimOrEmpty(object value)
+        {
+            if (value == null)
+            {
+                return string.Empty;
+            }
+
+            string s = Convert.ToString(value, CultureInfo.InvariantCulture);
+            return string.IsNullOrWhiteSpace(s) ? string.Empty : s.Trim();
+        }
+
+        internal static bool IsNullOrEmpty(object value)
+        {
+            if (value == null)
+            {
+                return true;
+            }
+
+            if (value is string s)
+            {
+                return string.IsNullOrWhiteSpace(s);
+            }
+
+            if (value is double d)
+            {
+                return double.IsNaN(d) || double.IsInfinity(d);
+            }
+
+            return false;
+        }
+
+        internal static Excel.Worksheet FindWorksheet(Excel.Workbook workbook, string sheetName)
+        {
+            if (workbook == null)
+            {
+                return null;
+            }
+
+            Excel.Sheets sheets = null;
+
+            try
+            {
+                sheets = workbook.Worksheets;
+                int count = sheets?.Count ?? 0;
+
+                for (int i = 1; i <= count; i++)
+                {
+                    Excel.Worksheet candidate = null;
+                    try
+                    {
+                        candidate = sheets[i] as Excel.Worksheet;
+                        if (candidate != null && string.Equals(candidate.Name, sheetName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            Excel.Worksheet result = candidate;
+                            candidate = null;
+                            return result;
+                        }
+                    }
+                    finally
+                    {
+                        ReleaseCom(candidate);
+                    }
+                }
+
+                return null;
+            }
+            finally
+            {
+                ReleaseCom(sheets);
+            }
+        }
+
         /// <summary>
         /// Release a COM RCW immediately (safe no-op for managed objects).
         /// </summary>

@@ -243,7 +243,10 @@ namespace MGT
                     int assignedCount = 0;
                     int failedCount = 0;
 
-                    UiHelpers.UpdateAssignmentProgressBar(0, totalPrepared, BuildProgressStatus(0, totalPrepared));
+                    UiHelpers.UpdateAssignmentProgressBar(
+                        0,
+                        totalPrepared,
+                        UiHelpers.FormatProgressStatus(0, totalPrepared, "Assigned", "area"));
 
                     try
                     {
@@ -273,7 +276,7 @@ namespace MGT
                             UiHelpers.UpdateAssignmentProgressBar(
                                 assignedCount,
                                 totalPrepared,
-                                BuildProgressStatus(assignedCount, totalPrepared));
+                                UiHelpers.FormatProgressStatus(assignedCount, totalPrepared, "Assigned", "area"));
                         }
                     }
                     finally
@@ -340,9 +343,9 @@ namespace MGT
 
             for (int i = 0; i < excelData.RowCount; i++)
             {
-                string areaName = TrimOrEmpty(excelData.AreaName[i]);
-                string loadPattern = TrimOrEmpty(excelData.LoadPattern[i]);
-                string coordinateSystem = TrimOrEmpty(excelData.CoordinateSystem[i]);
+                string areaName = ExcelHelpers.TrimOrEmpty(excelData.AreaName[i]);
+                string loadPattern = ExcelHelpers.TrimOrEmpty(excelData.LoadPattern[i]);
+                string coordinateSystem = ExcelHelpers.TrimOrEmpty(excelData.CoordinateSystem[i]);
                 int? rawDirection = excelData.Direction[i];
                 double? rawValue = excelData.Value[i];
 
@@ -384,39 +387,6 @@ namespace MGT
             }
 
             return prepared;
-        }
-
-        private static string BuildProgressStatus(int assignedCount, int totalPrepared)
-        {
-            if (totalPrepared <= 0)
-            {
-                return string.Empty;
-            }
-
-            double percent = totalPrepared == 0 ? 0.0 : (assignedCount / (double)totalPrepared) * 100.0;
-            return $"Assigned {assignedCount} of {totalPrepared} areas ({percent:0.##}%).";
-        }
-
-        private static string BuildExcelProgressStatus(int processedRows, int totalRows)
-        {
-            int safeProcessed = Math.Max(0, processedRows);
-            int safeTotal = Math.Max(0, totalRows);
-            if (safeTotal <= 0)
-            {
-                return $"Reading Excel ({safeProcessed})";
-            }
-
-            int clamped = Math.Min(safeProcessed, safeTotal);
-            double percent = (clamped / (double)safeTotal) * 100.0;
-            return $"Reading Excel {clamped} of {safeTotal} rows ({percent:0.##}%).";
-        }
-
-        private static string BuildExcelDoneStatus(int rowCount)
-        {
-            int safeCount = Math.Max(0, rowCount);
-            return safeCount == 1
-                ? "Excel Done (1 row)"
-                : $"Excel Done ({safeCount} rows)";
         }
 
         private static GH_Structure<GH_ObjectWrapper> BuildValueTree(ExcelLoadData data)
@@ -481,7 +451,7 @@ namespace MGT
                     throw new InvalidOperationException($"Invalid workbook: expected sheet name '{DefaultSheetName}'.");
                 }
 
-                ws = FindWorksheet(wb, sheetName);
+                ws = ExcelHelpers.FindWorksheet(wb, sheetName);
                 if (ws == null)
                 {
                     throw new InvalidOperationException($"Worksheet '{sheetName}' not found in '{Path.GetFileName(fullPath)}'.");
@@ -507,7 +477,7 @@ namespace MGT
                     try
                     {
                         headerCell = (Excel.Range)ws.Cells[1, startColumn + col];
-                        string headerValue = TrimOrEmpty(headerCell?.Value2);
+                        string headerValue = ExcelHelpers.TrimOrEmpty(headerCell?.Value2);
                         data.Headers.Add(headerValue);
 
                         if (!string.Equals(headerValue, expectedHeaders[col], StringComparison.OrdinalIgnoreCase))
@@ -538,7 +508,10 @@ namespace MGT
                 }
 
                 int totalRows = Math.Max(0, lastRow - 1);
-                progressCallback?.Invoke(0, totalRows, BuildExcelProgressStatus(0, totalRows));
+                progressCallback?.Invoke(
+                    0,
+                    totalRows,
+                    UiHelpers.FormatProgressStatus(0, totalRows, "Reading Excel", "row"));
 
                 int processedRows = 0;
 
@@ -555,7 +528,7 @@ namespace MGT
                             cell = (Excel.Range)ws.Cells[row, startColumn + col];
                             object value = cell?.Value2;
                             rowValues[col] = value;
-                            if (!IsNullOrEmptyExcel(value))
+                            if (!ExcelHelpers.IsNullOrEmpty(value))
                             {
                                 hasData = true;
                             }
@@ -568,21 +541,27 @@ namespace MGT
 
                     processedRows++;
                     int current = totalRows > 0 ? Math.Min(processedRows, totalRows) : processedRows;
-                    progressCallback?.Invoke(current, totalRows, BuildExcelProgressStatus(current, totalRows));
+                    progressCallback?.Invoke(
+                        current,
+                        totalRows,
+                        UiHelpers.FormatProgressStatus(current, totalRows, "Reading Excel", "row"));
 
                     if (!hasData)
                     {
                         continue;
                     }
 
-                    data.AreaName.Add(TrimOrEmpty(rowValues[0]));
-                    data.LoadPattern.Add(TrimOrEmpty(rowValues[1]));
-                    data.CoordinateSystem.Add(TrimOrEmpty(rowValues[2]));
+                    data.AreaName.Add(ExcelHelpers.TrimOrEmpty(rowValues[0]));
+                    data.LoadPattern.Add(ExcelHelpers.TrimOrEmpty(rowValues[1]));
+                    data.CoordinateSystem.Add(ExcelHelpers.TrimOrEmpty(rowValues[2]));
                     data.Direction.Add(ParseNullableInt(rowValues[3]));
                     data.Value.Add(ParseNullableDouble(rowValues[4]));
                 }
 
-                progressCallback?.Invoke(data.RowCount, data.RowCount, BuildExcelDoneStatus(data.RowCount));
+                progressCallback?.Invoke(
+                    data.RowCount,
+                    data.RowCount,
+                    UiHelpers.FormatCompletionStatus(data.RowCount, "Excel Done", "row"));
 
                 return data;
             }
@@ -608,68 +587,6 @@ namespace MGT
             }
         }
 
-        private static Excel.Worksheet FindWorksheet(Excel.Workbook wb, string sheetName)
-        {
-            if (wb == null)
-            {
-                return null;
-            }
-
-            if (string.IsNullOrWhiteSpace(sheetName))
-            {
-                sheetName = "Sheet1";
-            }
-
-            Excel.Worksheet result = null;
-
-            for (int i = 1; i <= wb.Worksheets.Count; i++)
-            {
-                Excel.Worksheet candidate = null;
-                try
-                {
-                    candidate = (Excel.Worksheet)wb.Worksheets[i];
-                    if (candidate != null && string.Equals(candidate.Name, sheetName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        result = candidate;
-                        candidate = null;
-                        break;
-                    }
-                }
-                finally
-                {
-                    ExcelHelpers.ReleaseCom(candidate);
-                }
-            }
-
-            return result;
-        }
-
-        private static bool IsNullOrEmptyExcel(object value)
-        {
-            if (value == null)
-            {
-                return true;
-            }
-
-            if (value is string s)
-            {
-                return string.IsNullOrWhiteSpace(s);
-            }
-
-            if (value is double d)
-            {
-                return double.IsNaN(d) || double.IsInfinity(d);
-            }
-
-            return false;
-        }
-
-        private static string TrimOrEmpty(object value)
-        {
-            string raw = Convert.ToString(value, CultureInfo.InvariantCulture);
-            return string.IsNullOrWhiteSpace(raw) ? string.Empty : raw.Trim();
-        }
-
         private static int? ParseNullableInt(object value)
         {
             if (value == null)
@@ -682,7 +599,7 @@ namespace MGT
                 return (int)Math.Round(d, MidpointRounding.AwayFromZero);
             }
 
-            string s = TrimOrEmpty(value);
+            string s = ExcelHelpers.TrimOrEmpty(value);
             if (string.IsNullOrEmpty(s))
             {
                 return null;
@@ -708,7 +625,7 @@ namespace MGT
                 return d;
             }
 
-            string s = TrimOrEmpty(value);
+            string s = ExcelHelpers.TrimOrEmpty(value);
             if (string.IsNullOrEmpty(s))
             {
                 return null;
@@ -845,8 +762,8 @@ namespace MGT
             // Each row contributes at most one combo because HashSet removes duplicates.
             for (int i = 0; i < data.RowCount; i++)
             {
-                string area = TrimOrEmpty(data.AreaName[i]);
-                string pattern = TrimOrEmpty(data.LoadPattern[i]);
+                string area = ExcelHelpers.TrimOrEmpty(data.AreaName[i]);
+                string pattern = ExcelHelpers.TrimOrEmpty(data.LoadPattern[i]);
 
                 if (string.IsNullOrEmpty(area) || string.IsNullOrEmpty(pattern))
                 {
