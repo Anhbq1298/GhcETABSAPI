@@ -1046,6 +1046,7 @@ namespace MGT
 
             Excel.Worksheet ws = null;
             Excel.Range topLeft = null, bottomRight = null, fullBlock = null;
+            Excel.Range rowsFromHeader = null, headerCell = null, lastCellInColumn = null;
             Excel.Range headerRight = null, headerRow = null;
             Excel.Range dataRange = null;
 
@@ -1101,6 +1102,17 @@ namespace MGT
                 // Target block: exactly header + data (focus area)
                 startRow = Math.Max(1, startRow);
                 startColumn = Math.Max(1, startColumn);
+
+                // Remove all existing rows starting from the header row before writing new data
+                try
+                {
+                    headerCell = (Excel.Range)ws.Cells[startRow, 1];
+                    lastCellInColumn = (Excel.Range)ws.Cells[ws.Rows.Count, 1];
+                    rowsFromHeader = ws.Range[headerCell, lastCellInColumn].EntireRow;
+                    rowsFromHeader.Delete(Excel.XlDeleteShiftDirection.xlShiftUp);
+                }
+                catch { /* ignore */ }
+
                 topLeft = (Excel.Range)ws.Cells[startRow, startColumn];
                 bottomRight = (Excel.Range)ws.Cells[startRow + totalRows - 1, startColumn + colCount - 1];
                 fullBlock = ws.Range[topLeft, bottomRight];
@@ -1188,6 +1200,9 @@ namespace MGT
             finally
             {
                 ReleaseCom(dataRange);
+                ReleaseCom(rowsFromHeader);
+                ReleaseCom(lastCellInColumn);
+                ReleaseCom(headerCell);
                 ReleaseCom(fullBlock);
                 ReleaseCom(topLeft);
                 ReleaseCom(bottomRight);
