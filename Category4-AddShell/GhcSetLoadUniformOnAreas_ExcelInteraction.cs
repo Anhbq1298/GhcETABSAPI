@@ -422,7 +422,7 @@ namespace MGT
             string sheetName,
             Action<int, int, string> progressCallback = null)
         {
-            ExcelSheetReader.ExcelSheetProfile profile = new ExcelSheetReader.ExcelSheetProfile
+            ExcelHelpers.ExcelSheetProfile profile = new ExcelHelpers.ExcelSheetProfile
             {
                 ExpectedSheetName = DefaultSheetName,
                 StartColumn = 2,
@@ -436,7 +436,7 @@ namespace MGT
                 }
             };
 
-            ExcelSheetReader.ExcelSheetReadResult result = ExcelSheetReader.ReadSheet(
+            ExcelHelpers.ExcelSheetReadResult result = ExcelHelpers.ReadSheet(
                 fullPath,
                 sheetName,
                 profile,
