@@ -152,7 +152,10 @@ namespace MGT
                         throw new InvalidOperationException("Failed to read point names from ETABS.");
                     }
 
-                    UiHelpers.UpdateAssignmentProgressBar(0, totalRows, BuildAssignmentStatus(0, totalRows));
+                    UiHelpers.UpdateAssignmentProgressBar(
+                        0,
+                        totalRows,
+                        UiHelpers.FormatProgressStatus(0, totalRows, "Updating ETABS points", "row", "rows"));
 
                     ProcessRows(
                         sapModel,
@@ -163,7 +166,10 @@ namespace MGT
                         messages,
                         (current, total, status) => UiHelpers.UpdateAssignmentProgressBar(current, total, status));
 
-                    UiHelpers.UpdateAssignmentProgressBar(totalRows, totalRows, BuildAssignmentStatus(totalRows, totalRows));
+                    UiHelpers.UpdateAssignmentProgressBar(
+                        totalRows,
+                        totalRows,
+                        UiHelpers.FormatProgressStatus(totalRows, totalRows, "Updating ETABS points", "row", "rows"));
                 }
 
                 if (highlightedCells > 0)
@@ -228,6 +234,7 @@ namespace MGT
             Excel.Range usedRange = null;
 
             bool workbookModified = false;
+            int totalRows = 0;
 
             try
             {
@@ -250,7 +257,7 @@ namespace MGT
                     IgnoreReadOnlyRecommended: true,
                     AddToMru: false);
 
-                sheet = FindWorksheet(workbook, sheetName);
+                sheet = ExcelHelpers.FindWorksheet(workbook, sheetName);
                 if (sheet == null)
                 {
                     throw new InvalidOperationException($"Worksheet '{sheetName}' not found.");
@@ -280,16 +287,22 @@ namespace MGT
 
                 usedRange = sheet.UsedRange;
                 int lastRow = Math.Max(StartRow, (usedRange?.Row ?? StartRow) + (usedRange?.Rows?.Count ?? 0) - 1);
-                int totalRows = Math.Max(0, lastRow - StartRow + 1);
+                totalRows = Math.Max(0, lastRow - StartRow + 1);
 
                 // Surface progress to the component UI so long-running imports
                 // show signs of life.
-                progress?.Invoke(0, totalRows, BuildExcelStatus(0, totalRows));
+                progress?.Invoke(
+                    0,
+                    totalRows,
+                    UiHelpers.FormatProgressStatus(0, totalRows, "Reading Excel", "row", "rows"));
 
-                for (int rowIndex = 0; rowIndex < totalRows; rowIndex++)
+                for (int row = 0; row < totalRows; row++)
                 {
-                    int excelRow = StartRow + rowIndex;
-                    progress?.Invoke(rowIndex, totalRows, BuildExcelStatus(rowIndex, totalRows));
+                    int excelRow = StartRow + row;
+                    progress?.Invoke(
+                        row,
+                        totalRows,
+                        UiHelpers.FormatProgressStatus(row, totalRows, "Reading Excel", "row", "rows"));
 
                     string name = string.Empty;
                     double? x = null;
@@ -308,7 +321,7 @@ namespace MGT
                             {
                                 // Paint differences compared to the saved
                                 // baseline so users can spot edits quickly.
-                                bool changed = baseline.IsDifferent(columnIndex, rowIndex, value);
+                                bool changed = baseline.IsDifferent(columnIndex, row, value);
                                 bool colorChanged = UpdateCellColor(cell, changed);
                                 if (colorChanged)
                                 {
@@ -356,7 +369,10 @@ namespace MGT
                     });
                 }
 
-                progress?.Invoke(totalRows, totalRows, BuildExcelStatus(totalRows, totalRows));
+                progress?.Invoke(
+                    totalRows,
+                    totalRows,
+                    UiHelpers.FormatProgressStatus(totalRows, totalRows, "Reading Excel", "row", "rows"));
 
                 if (workbookModified)
                 {
@@ -378,78 +394,6 @@ namespace MGT
             }
 
             return rows;
-        }
-
-        private static Excel.Worksheet FindWorksheet(Excel.Workbook workbook, string sheetName)
-        {
-            if (workbook == null)
-            {
-                return null;
-            }
-
-            Excel.Sheets sheets = null;
-            Excel.Worksheet target = null;
-
-            try
-            {
-                sheets = workbook.Worksheets;
-                int count = sheets?.Count ?? 0;
-
-                // Iterate using the COM indexer so we can release each
-                // candidate immediately after comparing its name.
-                for (int i = 1; i <= count; i++)
-                {
-                    Excel.Worksheet candidate = null;
-                    try
-                    {
-                        candidate = sheets[i] as Excel.Worksheet;
-                        if (candidate != null && string.Equals(candidate.Name, sheetName, StringComparison.OrdinalIgnoreCase))
-                        {
-                            target = candidate;
-                            candidate = null; // Ownership transferred to caller.
-                            break;
-                        }
-                    }
-                    finally
-                    {
-                        if (candidate != null)
-                        {
-                            ExcelHelpers.ReleaseCom(candidate);
-                        }
-                    }
-                }
-            }
-            finally
-            {
-                ExcelHelpers.ReleaseCom(sheets);
-            }
-
-            return target;
-        }
-
-        private static string BuildExcelStatus(int processed, int total)
-        {
-            if (total <= 0)
-            {
-                return "Reading Excel (0 rows)";
-            }
-
-            // Present a friendly status string that reports both count and %.
-            int clamped = Math.Min(Math.Max(processed, 0), total);
-            double percent = total == 0 ? 0.0 : (clamped / (double)total) * 100.0;
-            return $"Reading Excel {clamped} of {total} row(s) ({percent:0.##}%).";
-        }
-
-        private static string BuildAssignmentStatus(int processed, int total)
-        {
-            if (total <= 0)
-            {
-                return "Updating ETABS points (0 rows)";
-            }
-
-            int clamped = Math.Min(Math.Max(processed, 0), total);
-            double percent = total == 0 ? 0.0 : (clamped / (double)total) * 100.0;
-            return $"Updating ETABS points {clamped} of {total} row(s) ({percent:0.##}%).";
         }
 
         private static bool UpdateCellColor(Excel.Range cell, bool changed)
@@ -537,7 +481,10 @@ namespace MGT
                 // rows were skipped or bailed out early, so the UI stayed frozen even
                 // though the loop kept working. Publishing the progress after every
                 // row (including skipped ones) keeps the bar in sync with the work.
-                progress?.Invoke(processed, total, BuildAssignmentStatus(processed, total));
+                progress?.Invoke(
+                    processed,
+                    total,
+                    UiHelpers.FormatProgressStatus(processed, total, "Updating ETABS points", "row", "rows"));
             }
 
             // Walk the Excel rows in order so operations respect the worksheet
