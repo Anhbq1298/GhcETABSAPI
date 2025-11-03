@@ -10,6 +10,52 @@ namespace MGT
         private static readonly object _syncRoot = new object();
         private static ProgressWindow _progressWindow;
 
+        internal static string FormatProgressStatus(
+            int processed,
+            int total,
+            string action,
+            string unitSingular,
+            string unitPlural = null,
+            bool useFixedUnitLabel = false)
+        {
+            int safeProcessed = Math.Max(0, processed);
+            int safeTotal = Math.Max(0, total);
+            string plural = unitPlural ?? unitSingular + "s";
+
+            if (safeTotal <= 0)
+            {
+                string zeroUnit = useFixedUnitLabel ? (unitPlural ?? unitSingular) : plural;
+                return $"{action} ({safeProcessed} {zeroUnit})";
+            }
+
+            int clamped = Math.Min(safeProcessed, safeTotal);
+            double percent = safeTotal == 0 ? 0.0 : (clamped / (double)safeTotal) * 100.0;
+
+            string unitLabel;
+            if (useFixedUnitLabel)
+            {
+                unitLabel = unitPlural ?? unitSingular;
+            }
+            else
+            {
+                unitLabel = clamped == 1 ? unitSingular : plural;
+            }
+
+            return $"{action} {clamped} of {safeTotal} {unitLabel} ({percent:0.##}%).";
+        }
+
+        internal static string FormatCompletionStatus(
+            int count,
+            string action,
+            string unitSingular,
+            string unitPlural = null)
+        {
+            int safeCount = Math.Max(0, count);
+            string plural = unitPlural ?? unitSingular + "s";
+            string unitLabel = safeCount == 1 ? unitSingular : plural;
+            return $"{action} ({safeCount} {unitLabel})";
+        }
+
         internal static void ShowProgressBar(string title, string initialStatus, int maximum)
         {
             ShowDualProgressBar(title, string.Empty, 0, initialStatus, maximum);
