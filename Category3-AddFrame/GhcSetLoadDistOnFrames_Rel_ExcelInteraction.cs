@@ -254,7 +254,7 @@ namespace MGT
                     UiHelpers.UpdateAssignmentProgressBar(
                         0,
                         totalPrepared,
-                        BuildProgressStatus(0, totalPrepared));
+                        UiHelpers.FormatProgressStatus(0, totalPrepared, "Assigned", "member"));
 
                     try
                     {
@@ -282,7 +282,7 @@ namespace MGT
                                 UiHelpers.UpdateAssignmentProgressBar(
                                     assignedCount,
                                     totalPrepared,
-                                    BuildProgressStatus(assignedCount, totalPrepared));
+                                    UiHelpers.FormatProgressStatus(assignedCount, totalPrepared, "Assigned", "member"));
                             }
                             else
                             {
@@ -291,14 +291,14 @@ namespace MGT
                                 UiHelpers.UpdateAssignmentProgressBar(
                                     assignedCount,
                                     totalPrepared,
-                                    BuildProgressStatus(assignedCount, totalPrepared));
+                                    UiHelpers.FormatProgressStatus(assignedCount, totalPrepared, "Assigned", "member"));
                             }
                         }
 
                         UiHelpers.UpdateAssignmentProgressBar(
                             assignedCount,
                             totalPrepared,
-                            BuildProgressStatus(assignedCount, totalPrepared));
+                            UiHelpers.FormatProgressStatus(assignedCount, totalPrepared, "Assigned", "member"));
                     }
                     finally
                     {
@@ -502,8 +502,8 @@ namespace MGT
             // Translate each Excel row into a de-duplicated frame/pattern pair.
             for (int i = 0; i < data.RowCount; i++)
             {
-                string frame = TrimOrEmpty(data.FrameName[i]);
-                string pattern = TrimOrEmpty(data.LoadPattern[i]);
+                string frame = ExcelHelpers.TrimOrEmpty(data.FrameName[i]);
+                string pattern = ExcelHelpers.TrimOrEmpty(data.LoadPattern[i]);
 
                 if (string.IsNullOrEmpty(frame) || string.IsNullOrEmpty(pattern))
                 {
@@ -645,8 +645,8 @@ namespace MGT
 
             for (int i = 0; i < excelData.RowCount; i++)
             {
-                string frameName = TrimOrEmpty(excelData.FrameName[i]);
-                string loadPattern = TrimOrEmpty(excelData.LoadPattern[i]);
+                string frameName = ExcelHelpers.TrimOrEmpty(excelData.FrameName[i]);
+                string loadPattern = ExcelHelpers.TrimOrEmpty(excelData.LoadPattern[i]);
                 int? rawType = excelData.MyType[i];
                 int? rawDirection = excelData.Direction[i];
                 double? rawRelDist1 = excelData.RelDist1[i];
@@ -735,39 +735,6 @@ namespace MGT
             return prepared;
         }
 
-        private static string BuildProgressStatus(int assignedCount, int totalPrepared)
-        {
-            if (totalPrepared <= 0)
-            {
-                return "";
-            }
-
-            double percent = totalPrepared == 0 ? 0.0 : (assignedCount / (double)totalPrepared) * 100.0;
-            return $"Assigned {assignedCount} of {totalPrepared} members ({percent:0.##}%).";
-        }
-
-        private static string BuildExcelProgressStatus(int processedRows, int totalRows)
-        {
-            int safeProcessed = Math.Max(0, processedRows);
-            int safeTotal = Math.Max(0, totalRows);
-            if (safeTotal <= 0)
-            {
-                return $"Reading Excel ({safeProcessed})";
-            }
-
-            int clamped = Math.Min(safeProcessed, safeTotal);
-            double percent = (clamped / (double)safeTotal) * 100.0;
-            return $"Reading Excel {clamped} of {safeTotal} rows ({percent:0.##}%).";
-        }
-
-        private static string BuildExcelDoneStatus(int rowCount)
-        {
-            int safeCount = Math.Max(0, rowCount);
-            return safeCount == 1
-                ? "Excel Done (1 row)"
-                : $"Excel Done ({safeCount} rows)";
-        }
-
         private readonly struct PreparedLoadAssignment
         {
             internal PreparedLoadAssignment(
@@ -840,7 +807,7 @@ namespace MGT
                     throw new InvalidOperationException($"Invalid workbook: expected sheet name '{expectedSheetName}'.");
                 }
 
-                ws = FindWorksheet(wb, sheetName);
+                ws = ExcelHelpers.FindWorksheet(wb, sheetName);
                 if (ws == null)
                 {
                     throw new InvalidOperationException($"Worksheet '{sheetName}' not found in '{Path.GetFileName(fullPath)}'.");
@@ -873,7 +840,7 @@ namespace MGT
                     try
                     {
                         headerCell = (Excel.Range)ws.Cells[1, startColumn + col];
-                        string headerValue = TrimOrEmpty(headerCell?.Value2);
+                        string headerValue = ExcelHelpers.TrimOrEmpty(headerCell?.Value2);
                         data.Headers.Add(headerValue);
 
                         if (!string.Equals(headerValue, expectedHeaders[col], StringComparison.OrdinalIgnoreCase))
@@ -904,7 +871,10 @@ namespace MGT
                 }
 
                 int totalRows = Math.Max(0, lastRow - 1);
-                progressCallback?.Invoke(0, totalRows, BuildExcelProgressStatus(0, totalRows));
+                progressCallback?.Invoke(
+                    0,
+                    totalRows,
+                    UiHelpers.FormatProgressStatus(0, totalRows, "Reading Excel", "row"));
 
                 int processedRows = 0;
 
@@ -921,7 +891,7 @@ namespace MGT
                             cell = (Excel.Range)ws.Cells[row, startColumn + col];
                             object value = cell?.Value2;
                             rowValues[col] = value;
-                            if (!IsNullOrEmptyExcel(value))
+                            if (!ExcelHelpers.IsNullOrEmpty(value))
                             {
                                 hasData = true;
                             }
@@ -934,17 +904,20 @@ namespace MGT
 
                     processedRows++;
                     int current = totalRows > 0 ? Math.Min(processedRows, totalRows) : processedRows;
-                    progressCallback?.Invoke(current, totalRows, BuildExcelProgressStatus(current, totalRows));
+                    progressCallback?.Invoke(
+                        current,
+                        totalRows,
+                        UiHelpers.FormatProgressStatus(current, totalRows, "Reading Excel", "row"));
 
                     if (!hasData)
                     {
                         continue;
                     }
 
-                    data.FrameName.Add(TrimOrEmpty(rowValues[0]));
-                    data.LoadPattern.Add(TrimOrEmpty(rowValues[1]));
+                    data.FrameName.Add(ExcelHelpers.TrimOrEmpty(rowValues[0]));
+                    data.LoadPattern.Add(ExcelHelpers.TrimOrEmpty(rowValues[1]));
                     data.MyType.Add(ParseLoadType(rowValues[2]));
-                    data.CoordinateSystem.Add(TrimOrEmpty(rowValues[3]));
+                    data.CoordinateSystem.Add(ExcelHelpers.TrimOrEmpty(rowValues[3]));
                     data.Direction.Add(ParseNullableInt(rowValues[4]));
                     data.RelDist1.Add(ParseNullableDouble(rowValues[5]));
                     data.RelDist2.Add(ParseNullableDouble(rowValues[6]));
@@ -954,7 +927,10 @@ namespace MGT
                     data.Value2.Add(ParseNullableDouble(rowValues[10]));
                 }
 
-                progressCallback?.Invoke(data.RowCount, data.RowCount, BuildExcelDoneStatus(data.RowCount));
+                progressCallback?.Invoke(
+                    data.RowCount,
+                    data.RowCount,
+                    UiHelpers.FormatCompletionStatus(data.RowCount, "Excel Done", "row"));
 
                 return data;
             }
@@ -978,35 +954,6 @@ namespace MGT
 
                 ExcelHelpers.ReleaseCom(app);
             }
-        }
-
-        private static Excel.Worksheet FindWorksheet(Excel.Workbook wb, string sheetName)
-        {
-            if (wb == null) return null;
-            if (string.IsNullOrWhiteSpace(sheetName)) sheetName = "Sheet1";
-
-            Excel.Worksheet result = null;
-
-            for (int i = 1; i <= wb.Worksheets.Count; i++)
-            {
-                Excel.Worksheet candidate = null;
-                try
-                {
-                    candidate = (Excel.Worksheet)wb.Worksheets[i];
-                    if (candidate != null && string.Equals(candidate.Name, sheetName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        result = candidate;
-                        candidate = null;
-                        break;
-                    }
-                }
-                finally
-                {
-                    ExcelHelpers.ReleaseCom(candidate);
-                }
-            }
-
-            return result;
         }
 
         private static GH_Structure<GH_ObjectWrapper> BuildValueTree(ExcelLoadData data)
@@ -1044,32 +991,6 @@ namespace MGT
             }
         }
 
-        private static string TrimOrEmpty(object value)
-        {
-            if (value == null)
-            {
-                return string.Empty;
-            }
-
-            string s = Convert.ToString(value, CultureInfo.InvariantCulture);
-            return string.IsNullOrWhiteSpace(s) ? string.Empty : s.Trim();
-        }
-
-        private static bool IsNullOrEmptyExcel(object value)
-        {
-            if (value == null)
-            {
-                return true;
-            }
-
-            if (value is string s)
-            {
-                return string.IsNullOrWhiteSpace(s);
-            }
-
-            return false;
-        }
-
         private static int? ParseLoadType(object value)
         {
             if (value == null)
@@ -1082,7 +1003,7 @@ namespace MGT
                 return NormalizeLoadType((int)Math.Round(d, MidpointRounding.AwayFromZero));
             }
 
-            string s = TrimOrEmpty(value);
+            string s = ExcelHelpers.TrimOrEmpty(value);
             if (string.IsNullOrEmpty(s))
             {
                 return null;
@@ -1118,7 +1039,7 @@ namespace MGT
                 return (int)Math.Round(d, MidpointRounding.AwayFromZero);
             }
 
-            string s = TrimOrEmpty(value);
+            string s = ExcelHelpers.TrimOrEmpty(value);
             if (string.IsNullOrEmpty(s))
             {
                 return null;
@@ -1144,7 +1065,7 @@ namespace MGT
                 return d;
             }
 
-            string s = TrimOrEmpty(value);
+            string s = ExcelHelpers.TrimOrEmpty(value);
             if (string.IsNullOrEmpty(s))
             {
                 return null;
