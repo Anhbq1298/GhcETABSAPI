@@ -359,7 +359,7 @@ namespace MGT
         /// <summary>
         /// Force-restart Excel: close any running instance, then open workbook.
         /// If 'filePathOrRelative' is null/empty, creates a temp workbook (temp.xlsx).
-        /// Returns true if a new Excel Application was created (always true on success here).
+        /// Returns true if a new Excel.Application was created (always true on success here).
         /// </summary>
         internal static bool AttachOrOpenWorkbook(
             out Excel.Application app,
@@ -543,7 +543,7 @@ namespace MGT
         }
 
         /// <summary>
-        /// Maximize Excel UI window(s) reliably (MDI/SDI): Application & ActiveWindow + Win32.
+        /// Maximize Excel UI window(s) reliably (MDI/SDI): Excel.Application & ActiveWindow + Win32.
         /// </summary>
         private static void MaximizeExcelWindow(Excel.Application app)
         {
@@ -1132,7 +1132,7 @@ namespace MGT
         #region Ribbon / CommandBars (reflection)
 
         /// <summary>
-        /// Late-bind Application.CommandBars.ExecuteMso(controlId) to avoid referencing office.dll.
+        /// Late-bind Excel.Application.CommandBars.ExecuteMso(controlId) to avoid referencing office.dll.
         /// Works on .NET 8 without Microsoft.Office.Core.
         /// </summary>
         private static void TryExecuteMso(object application, string controlId)
@@ -1428,10 +1428,12 @@ namespace MGT
                 try
                 {
                     ws.Activate();
-                    if (maximizeWindow) MaximizeExcelWindow(ws.Application); // opt-in
-                    try { ws.Application.Goto(topLeft, true); } catch { }
+                    Excel.Application excelApp = ws.Application;
+
+                    if (maximizeWindow) MaximizeExcelWindow(excelApp); // opt-in
+                    try { excelApp.Goto(topLeft, true); } catch { }
                     try { topLeft.Select(); } catch { }
-                    if (bringToFront) BringExcelToFront(ws.Application);
+                    if (bringToFront) BringExcelToFront(excelApp);
                 }
                 catch { }
 
@@ -1440,7 +1442,7 @@ namespace MGT
                 {
                     try
                     {
-                        ApplyKioskViewNoTable(ws.Application, ws, fullBlock, makeFullScreen);
+                        ApplyKioskViewNoTable(excelApp, ws, fullBlock, makeFullScreen);
                     }
                     catch { /* degrade gracefully */ }
                 }
