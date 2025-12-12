@@ -17,23 +17,11 @@
 		<Description>Meinhardt Grasshopper Tool</Description>
 	</PropertyGroup>
 
-	<!-- Excel COM Interop (Windows only) -->
-	<ItemGroup>
-		<COMReference Include="Microsoft.Office.Interop.Excel">
-			<WrapperTool>tlbimp</WrapperTool>
-			<VersionMajor>1</VersionMajor>
-			<VersionMinor>9</VersionMinor>
-			<Guid>00020813-0000-0000-C000-000000000046</Guid>
-			<Lcid>0</Lcid>
-			<Isolated>false</Isolated>
-			<EmbedInteropTypes>true</EmbedInteropTypes>
-		</COMReference>
-	</ItemGroup>
-
-	<!-- Grasshopper SDK for compile-time only (Rhino provides runtime) -->
-	<ItemGroup>
-		<PackageReference Include="Grasshopper" Version="8.0.23304.9001" ExcludeAssets="runtime" />
-	</ItemGroup>
+        <!-- Grasshopper SDK for compile-time only (Rhino provides runtime) -->
+        <ItemGroup>
+                <PackageReference Include="Grasshopper" Version="8.0.23304.9001" ExcludeAssets="runtime" />
+                <PackageReference Include="Microsoft.Office.Interop.Excel" Version="16.0.18925.20022" />
+        </ItemGroup>
 
 	<!-- ETABS COM Interop: DO NOT embed; copy DLL next to the .gha -->
 	<ItemGroup>
