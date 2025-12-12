@@ -416,7 +416,7 @@ namespace MGT
                                 Excel.Window window = null;
                                 try
                                 {
-                                    window = app.ActiveWindow;
+                                    window = TryGetActiveWindow(app);
                                     if (window != null) window.Caption = "temp";
                                 }
                                 finally { if (window != null) ReleaseCom(window); }
@@ -493,7 +493,7 @@ namespace MGT
                 try { app.Visible = true; app.UserControl = true; } catch { }
                 try
                 {
-                    var aw = app.ActiveWindow;
+                    var aw = TryGetActiveWindow(app);
                     if (aw != null)
                     {
                         try { aw.Activate(); } catch { }
@@ -514,6 +514,65 @@ namespace MGT
         }
 
         /// <summary>
+        /// Safely access Excel.Application.ActiveWindow even when interop definitions omit it.
+        /// </summary>
+        private static Excel.Window TryGetActiveWindow(Excel.Application app)
+        {
+            if (app == null) return null;
+            try
+            {
+                object aw = app.GetType().InvokeMember(
+                    "ActiveWindow",
+                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    app,
+                    null);
+                return aw as Excel.Window;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool? TryGetApplicationBool(Excel.Application app, string propertyName)
+        {
+            if (app == null || string.IsNullOrWhiteSpace(propertyName)) return null;
+            try
+            {
+                object value = app.GetType().InvokeMember(
+                    propertyName,
+                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    app,
+                    null);
+                return value as bool? ?? (value is bool b ? b : (bool?)null);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void TrySetApplicationBool(Excel.Application app, string propertyName, bool value)
+        {
+            if (app == null || string.IsNullOrWhiteSpace(propertyName)) return;
+            try
+            {
+                app.GetType().InvokeMember(
+                    propertyName,
+                    BindingFlags.SetProperty | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    app,
+                    new object[] { value });
+            }
+            catch
+            {
+                // no-op
+            }
+        }
+
+        /// <summary>
         /// Maximize Excel UI window(s) reliably (MDI/SDI): Application & ActiveWindow + Win32.
         /// </summary>
         private static void MaximizeExcelWindow(Excel.Application app)
@@ -525,7 +584,7 @@ namespace MGT
                 Excel.Window aw = null;
                 try
                 {
-                    aw = app.ActiveWindow;
+                    aw = TryGetActiveWindow(app);
                     if (aw != null)
                     {
                         try { aw.WindowState = Excel.XlWindowState.xlMaximized; } catch { }
@@ -555,10 +614,10 @@ namespace MGT
         {
             if (excel == null) return;
 
-            bool prevAlerts = false;
-            try { prevAlerts = excel.DisplayAlerts; excel.DisplayAlerts = false; } catch { }
-            try { excel.ScreenUpdating = false; } catch { }
-            try { excel.UserControl = false; } catch { }
+            bool prevAlerts = TryGetApplicationBool(excel, "DisplayAlerts") ?? false;
+            TrySetApplicationBool(excel, "DisplayAlerts", false);
+            TrySetApplicationBool(excel, "ScreenUpdating", false);
+            TrySetApplicationBool(excel, "UserControl", false);
 
             Excel.Workbooks books = null;
             try
@@ -908,13 +967,13 @@ namespace MGT
             UiState state = new UiState();
             try
             {
-                state.DisplayFullScreen = app.DisplayFullScreen;
-                state.DisplayFormulaBar = app.DisplayFormulaBar;
-                state.DisplayStatusBar = app.DisplayStatusBar;
-                state.ScreenUpdating = app.ScreenUpdating;
-                state.EnableEvents = app.EnableEvents;
+                state.DisplayFullScreen = TryGetApplicationBool(app, "DisplayFullScreen");
+                state.DisplayFormulaBar = TryGetApplicationBool(app, "DisplayFormulaBar");
+                state.DisplayStatusBar = TryGetApplicationBool(app, "DisplayStatusBar");
+                state.ScreenUpdating = TryGetApplicationBool(app, "ScreenUpdating");
+                state.EnableEvents = TryGetApplicationBool(app, "EnableEvents");
 
-                var win = app.ActiveWindow;
+                var win = TryGetActiveWindow(app);
                 if (win != null)
                 {
                     state.DisplayGridlines = win.DisplayGridlines;
@@ -930,16 +989,16 @@ namespace MGT
             // Hide chrome + zoom to selection
             try
             {
-                app.ScreenUpdating = true;
-                app.EnableEvents = false;
+                TrySetApplicationBool(app, "ScreenUpdating", true);
+                TrySetApplicationBool(app, "EnableEvents", false);
 
                 // Hide Ribbon (Excel4 macro)
                 try { app.ExecuteExcel4Macro(@"SHOW.TOOLBAR(""Ribbon"",False)"); } catch { }
 
-                app.DisplayFormulaBar = false;
-                app.DisplayStatusBar = false;
+                TrySetApplicationBool(app, "DisplayFormulaBar", false);
+                TrySetApplicationBool(app, "DisplayStatusBar", false);
 
-                var win = app.ActiveWindow;
+                var win = TryGetActiveWindow(app);
                 if (win != null)
                 {
                     // Hide most chrome but KEEP sheet tabs
@@ -957,18 +1016,18 @@ namespace MGT
                 }
 
                 // Do NOT force FullScreen unless requested
-                app.DisplayFullScreen = makeFullScreen;
+                TrySetApplicationBool(app, "DisplayFullScreen", makeFullScreen);
             }
             catch { }
             finally
             {
-                try { app.EnableEvents = true; } catch { }
+                TrySetApplicationBool(app, "EnableEvents", true);
             }
 
             // Scroll to top-left of range
             try
             {
-                var win = app.ActiveWindow;
+                var win = TryGetActiveWindow(app);
                 if (win != null)
                 {
                     win.ScrollRow = dataRange.Row;
@@ -987,18 +1046,18 @@ namespace MGT
         {
             if (app == null || state == null) return;
 
-            try { app.ScreenUpdating = state.ScreenUpdating ?? true; } catch { }
-            try { app.EnableEvents = state.EnableEvents ?? true; } catch { }
-            try { app.DisplayFullScreen = state.DisplayFullScreen ?? false; } catch { }
-            try { app.DisplayFormulaBar = state.DisplayFormulaBar ?? true; } catch { }
-            try { app.DisplayStatusBar = state.DisplayStatusBar ?? true; } catch { }
+            TrySetApplicationBool(app, "ScreenUpdating", state.ScreenUpdating ?? true);
+            TrySetApplicationBool(app, "EnableEvents", state.EnableEvents ?? true);
+            TrySetApplicationBool(app, "DisplayFullScreen", state.DisplayFullScreen ?? false);
+            TrySetApplicationBool(app, "DisplayFormulaBar", state.DisplayFormulaBar ?? true);
+            TrySetApplicationBool(app, "DisplayStatusBar", state.DisplayStatusBar ?? true);
 
             // Show Ribbon back
             try { app.ExecuteExcel4Macro(@"SHOW.TOOLBAR(""Ribbon"",True)"); } catch { }
 
             try
             {
-                var win = app.ActiveWindow;
+                var win = TryGetActiveWindow(app);
                 if (win != null)
                 {
                     if (state.DisplayGridlines != null) win.DisplayGridlines = state.DisplayGridlines.Value;
