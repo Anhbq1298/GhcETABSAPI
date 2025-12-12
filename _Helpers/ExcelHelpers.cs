@@ -357,9 +357,9 @@ namespace MGT
         #region Attach / Open / Close Excel
 
         /// <summary>
-        /// Force-restart Excel: close any running instance, then open workbook.
-        /// If 'filePathOrRelative' is null/empty, creates a temp workbook (temp.xlsx).
-        /// Returns true if a new Excel.Application was created (always true on success here).
+        /// Attach to a running Excel instance first; if the requested workbook is already open, reuse it.
+        /// Otherwise open the path (or create a temp workbook when path is empty). Returns true when a new
+        /// Excel application was created.
         /// </summary>
         internal static bool AttachOrOpenWorkbook(
             out Excel.Application app,
@@ -367,121 +367,82 @@ namespace MGT
             string filePathOrRelative,
             bool visible = true,
             bool readOnly = false,
-            bool maximizeWindow = false,   // default false (do not maximize)
-            bool bringToFront = true)      // default true (bring window to front)
+            bool maximizeWindow = false,
+            bool bringToFront = true)
         {
             lock (_excelLock)
             {
-                app = null;
+                app = TryGetRunningExcelApplication();
+                bool createdApplication = app == null;
                 wb = null;
 
-                bool createTemporaryWorkbook = string.IsNullOrWhiteSpace(filePathOrRelative);
+                string fullPath = string.IsNullOrWhiteSpace(filePathOrRelative)
+                    ? null
+                    : Path.GetFullPath(filePathOrRelative);
 
-                string fullPath = null;
-                if (!createTemporaryWorkbook)
-                {
-                    fullPath = filePathOrRelative;
-                    if (!File.Exists(fullPath)) return false;
-                }
-
-                // 0) Close any running Excel for a clean start
-                var running = TryGetRunningExcelApplication();
-                if (running != null) SafeQuitExcel(running);
-
-                // 1) Create fresh Excel & open workbook (no prompts)
-                bool createdApplication = false;
                 try
                 {
-                    app = new Excel.Application();
-                    createdApplication = true;
+                    if (app == null)
+                    {
+                        app = new Excel.Application();
+                    }
 
-                    bool prevAlerts = TryGetApplicationBool(app, "DisplayAlerts") ?? false;
+                    bool previousAlerts = TryGetApplicationBool(app, "DisplayAlerts") ?? false;
                     TrySetApplicationBool(app, "DisplayAlerts", false);
 
+                    Excel.Workbooks books = null;
                     try
                     {
-                        if (createTemporaryWorkbook)
+                        books = TryGetWorkbooks(app);
+
+                        if (string.IsNullOrWhiteSpace(fullPath))
                         {
                             wb = TryAddWorkbook(app);
-
-                            string tempDirectory = Path.GetTempPath();
-                            string tempFileName = "temp.xlsx";
-                            string tempFullPath = Path.Combine(tempDirectory, tempFileName);
-
-                            try { if (File.Exists(tempFullPath)) File.Delete(tempFullPath); } catch { }
-                            TrySaveWorkbook(wb, tempFullPath, Excel.XlFileFormat.xlOpenXMLWorkbook);
-
-                            try
-                            {
-                                Excel.Window window = null;
-                                try
-                                {
-                                    window = TryGetActiveWindow(app);
-                                    if (window != null) window.Caption = "temp";
-                                }
-                                finally { if (window != null) ReleaseCom(window); }
-                            }
-                            catch { }
                         }
                         else
                         {
-                            wb = TryOpenWorkbook(
-                                TryGetWorkbooks(app),
+                            if (!File.Exists(fullPath)) throw new FileNotFoundException(fullPath);
+
+                            wb = TryFindWorkbookByFullPath(books, fullPath) ?? TryOpenWorkbook(
+                                books,
                                 Filename: fullPath,
                                 UpdateLinks: 0,
                                 ReadOnly: readOnly,
                                 IgnoreReadOnlyRecommended: true,
-                                AddToMru: false
-                            );
-                        }
-                    }
-                    catch
-                    {
-                        if (!readOnly && !createTemporaryWorkbook)
-                        {
-                            wb = TryOpenWorkbook(
-                                TryGetWorkbooks(app),
-                                Filename: fullPath,
-                                UpdateLinks: 0,
-                                ReadOnly: true,
-                                IgnoreReadOnlyRecommended: true,
-                                AddToMru: false
-                            );
-                        }
-                        else
-                        {
-                            throw;
+                                AddToMru: false);
                         }
                     }
                     finally
                     {
-                        TrySetApplicationBool(app, "DisplayAlerts", prevAlerts);
+                        ReleaseCom(books);
+                        TrySetApplicationBool(app, "DisplayAlerts", previousAlerts);
                     }
 
-                    // 2) UI: show; no maximize unless asked; bring to front if requested
-                    try
+                    if (wb == null) throw new InvalidOperationException("Excel workbook could not be opened.");
+
+                    if (visible)
                     {
-                        if (visible)
-                        {
-                            TrySetApplicationBool(app, "Visible", true);
-                            TrySetApplicationBool(app, "UserControl", true);
-                        }
-                        wb.Activate();
-
-                        if (maximizeWindow) MaximizeExcelWindow(app);
-                        if (bringToFront) BringExcelToFront(app);
+                        TrySetApplicationBool(app, "Visible", true);
+                        TrySetApplicationBool(app, "UserControl", true);
                     }
-                    catch { /* no-op */ }
 
-                    return createdApplication; // true
+                    try { wb.Activate(); } catch { }
+                    if (maximizeWindow) MaximizeExcelWindow(app);
+                    if (bringToFront) BringExcelToFront(app);
+
+                    return createdApplication;
                 }
                 catch
                 {
-                    // Cleanup on failure
-                    try { if (createdApplication) app?.Quit(); } catch { }
-                    try { ReleaseCom(wb); } catch { }
-                    try { ReleaseCom(app); } catch { }
-                    wb = null; app = null;
+                    if (createdApplication)
+                    {
+                        try { app?.Quit(); } catch { }
+                    }
+
+                    ReleaseCom(wb);
+                    ReleaseCom(app);
+                    wb = null;
+                    app = null;
                     return false;
                 }
             }
@@ -677,6 +638,105 @@ namespace MGT
             {
                 return null;
             }
+        }
+
+        private static int TryGetWorkbooksCount(Excel.Workbooks books)
+        {
+            if (books == null) return 0;
+            try
+            {
+                object value = books.GetType().InvokeMember(
+                    "Count",
+                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    books,
+                    null);
+
+                if (value is int i) return i;
+                if (value is double d) return (int)d;
+            }
+            catch { }
+
+            return 0;
+        }
+
+        private static Excel.Workbook TryGetWorkbook(Excel.Workbooks books, int index)
+        {
+            if (books == null) return null;
+            try
+            {
+                return books.GetType().InvokeMember(
+                    "Item",
+                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    books,
+                    new object[] { index }) as Excel.Workbook;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string TryGetWorkbookFullName(Excel.Workbook wb)
+        {
+            if (wb == null) return null;
+            try
+            {
+                object value = wb.GetType().InvokeMember(
+                    "FullName",
+                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    wb,
+                    null);
+
+                return value as string ?? value?.ToString();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Excel.Workbook TryFindWorkbookByFullPath(Excel.Workbooks books, string fullPath)
+        {
+            if (books == null || string.IsNullOrWhiteSpace(fullPath)) return null;
+
+            string normalizedTarget = null;
+            try { normalizedTarget = Path.GetFullPath(fullPath); }
+            catch { normalizedTarget = fullPath; }
+
+            int count = TryGetWorkbooksCount(books);
+            Excel.Workbook match = null;
+            for (int i = 1; i <= count; i++)
+            {
+                Excel.Workbook candidate = null;
+                try
+                {
+                    candidate = TryGetWorkbook(books, i);
+                    string candidatePath = TryGetWorkbookFullName(candidate);
+                    if (string.IsNullOrWhiteSpace(candidatePath)) continue;
+
+                    string normalizedCandidate = candidatePath;
+                    try { normalizedCandidate = Path.GetFullPath(candidatePath); } catch { }
+
+                    if (string.Equals(normalizedCandidate, normalizedTarget, StringComparison.OrdinalIgnoreCase))
+                    {
+                        match = candidate;
+                        candidate = null; // prevent release
+                        break;
+                    }
+                }
+                finally
+                {
+                    if (candidate != null)
+                    {
+                        try { ReleaseCom(candidate); } catch { }
+                    }
+                }
+            }
+
+            return match;
         }
 
         private static Excel.Workbook TryAddWorkbook(Excel.Application app)
