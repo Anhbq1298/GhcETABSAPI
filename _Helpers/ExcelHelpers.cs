@@ -109,7 +109,7 @@ namespace MGT
 
             try
             {
-                sheets = workbook.Worksheets;
+                sheets = TryGetSheets(workbook);
                 int count = sheets?.Count ?? 0;
 
                 for (int i = 1; i <= count; i++)
@@ -203,8 +203,9 @@ namespace MGT
                 TrySetApplicationBool(app, "DisplayAlerts", false);
                 TrySetApplicationBool(app, "UserControl", false);
 
-                books = app.Workbooks;
-                wb = books.Open(
+                books = TryGetWorkbooks(app);
+                wb = TryOpenWorkbook(
+                    books,
                     Filename: fullPath,
                     UpdateLinks: 0,
                     ReadOnly: true,
@@ -401,14 +402,14 @@ namespace MGT
                     {
                         if (createTemporaryWorkbook)
                         {
-                            wb = app.Workbooks.Add(Type.Missing);
+                            wb = TryAddWorkbook(app);
 
                             string tempDirectory = Path.GetTempPath();
                             string tempFileName = "temp.xlsx";
                             string tempFullPath = Path.Combine(tempDirectory, tempFileName);
 
                             try { if (File.Exists(tempFullPath)) File.Delete(tempFullPath); } catch { }
-                            wb.SaveAs(tempFullPath, Excel.XlFileFormat.xlOpenXMLWorkbook);
+                            TrySaveWorkbook(wb, tempFullPath, Excel.XlFileFormat.xlOpenXMLWorkbook);
 
                             try
                             {
@@ -424,7 +425,8 @@ namespace MGT
                         }
                         else
                         {
-                            wb = app.Workbooks.Open(
+                            wb = TryOpenWorkbook(
+                                TryGetWorkbooks(app),
                                 Filename: fullPath,
                                 UpdateLinks: 0,
                                 ReadOnly: readOnly,
@@ -437,7 +439,8 @@ namespace MGT
                     {
                         if (!readOnly && !createTemporaryWorkbook)
                         {
-                            wb = app.Workbooks.Open(
+                            wb = TryOpenWorkbook(
+                                TryGetWorkbooks(app),
                                 Filename: fullPath,
                                 UpdateLinks: 0,
                                 ReadOnly: true,
@@ -458,7 +461,11 @@ namespace MGT
                     // 2) UI: show; no maximize unless asked; bring to front if requested
                     try
                     {
-                        if (visible) { app.Visible = true; app.UserControl = true; }
+                        if (visible)
+                        {
+                            TrySetApplicationBool(app, "Visible", true);
+                            TrySetApplicationBool(app, "UserControl", true);
+                        }
                         wb.Activate();
 
                         if (maximizeWindow) MaximizeExcelWindow(app);
@@ -489,7 +496,8 @@ namespace MGT
             try
             {
                 // Make sure Excel is visible and the workbook window is active
-                try { app.Visible = true; app.UserControl = true; } catch { }
+                TrySetApplicationBool(app, "Visible", true);
+                TrySetApplicationBool(app, "UserControl", true);
                 try
                 {
                     var aw = TryGetActiveWindow(app);
@@ -502,7 +510,7 @@ namespace MGT
                 catch { }
 
                 // Bring main HWND to front
-                IntPtr hwnd = (IntPtr)app.Hwnd;
+                IntPtr hwnd = TryGetApplicationHwnd(app);
                 if (hwnd != IntPtr.Zero)
                 {
                     ShowWindow(hwnd, SW_RESTORE);
@@ -540,12 +548,12 @@ namespace MGT
         private static void MaximizeExcelWindow(Excel.Application app)
         {
             if (app == null) return;
-            try
-            {
-                try { app.WindowState = Excel.XlWindowState.xlMaximized; } catch { }
-                Excel.Window aw = null;
                 try
                 {
+                    TrySetApplicationProperty(app, "WindowState", Excel.XlWindowState.xlMaximized);
+                    Excel.Window aw = null;
+                    try
+                    {
                     aw = TryGetActiveWindow(app);
                     if (aw != null)
                     {
@@ -558,7 +566,7 @@ namespace MGT
                     if (aw != null) ReleaseCom(aw);
                 }
 
-                IntPtr hwnd = (IntPtr)app.Hwnd;
+                IntPtr hwnd = TryGetApplicationHwnd(app);
                 if (hwnd != IntPtr.Zero)
                 {
                     ShowWindow(hwnd, SW_RESTORE);
@@ -614,6 +622,210 @@ namespace MGT
         }
 
         /// <summary>
+        /// Late-bind any property setter on Excel.Application (safe no-op on failure).
+        /// </summary>
+        private static void TrySetApplicationProperty(Excel.Application app, string propertyName, object value)
+        {
+            if (app == null || string.IsNullOrWhiteSpace(propertyName)) return;
+
+            try
+            {
+                app.GetType().InvokeMember(
+                    propertyName,
+                    BindingFlags.SetProperty | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    app,
+                    new object[] { value });
+            }
+            catch { }
+        }
+
+        private static IntPtr TryGetApplicationHwnd(Excel.Application app)
+        {
+            if (app == null) return IntPtr.Zero;
+
+            try
+            {
+                object value = app.GetType().InvokeMember(
+                    "Hwnd",
+                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    app,
+                    null);
+
+                if (value is int i) return new IntPtr(i);
+                if (value is long l) return new IntPtr(l);
+            }
+            catch { }
+
+            return IntPtr.Zero;
+        }
+
+        private static Excel.Workbooks TryGetWorkbooks(Excel.Application app)
+        {
+            if (app == null) return null;
+            try
+            {
+                return app.GetType().InvokeMember(
+                    "Workbooks",
+                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    app,
+                    null) as Excel.Workbooks;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Excel.Workbook TryAddWorkbook(Excel.Application app)
+        {
+            Excel.Workbooks books = null;
+            try
+            {
+                books = TryGetWorkbooks(app);
+                return books?.GetType().InvokeMember(
+                    "Add",
+                    BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    books,
+                    new object[] { Type.Missing }) as Excel.Workbook;
+            }
+            catch
+            {
+                return null;
+            }
+            finally
+            {
+                ReleaseCom(books);
+            }
+        }
+
+        private static Excel.Workbook TryOpenWorkbook(
+            Excel.Workbooks books,
+            string Filename,
+            int UpdateLinks,
+            bool ReadOnly,
+            bool IgnoreReadOnlyRecommended,
+            bool AddToMru)
+        {
+            if (books == null) return null;
+            try
+            {
+                return books.GetType().InvokeMember(
+                    "Open",
+                    BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    books,
+                    new object[] { Filename, UpdateLinks, ReadOnly, Type.Missing, Type.Missing, Type.Missing, true, "",
+                        AddToMru, false, Type.Missing, IgnoreReadOnlyRecommended, Type.Missing, Type.Missing, Type.Missing,
+                        Type.Missing, Type.Missing, Type.Missing }) as Excel.Workbook;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void TrySaveWorkbook(Excel.Workbook wb, string path, Excel.XlFileFormat format)
+        {
+            if (wb == null || string.IsNullOrWhiteSpace(path)) return;
+            try
+            {
+                wb.GetType().InvokeMember(
+                    "SaveAs",
+                    BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    wb,
+                    new object[] { path, format });
+            }
+            catch { }
+        }
+
+        private static Excel.Sheets TryGetSheets(Excel.Workbook workbook)
+        {
+            if (workbook == null) return null;
+            try
+            {
+                return workbook.GetType().InvokeMember(
+                    "Worksheets",
+                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    workbook,
+                    null) as Excel.Sheets;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static int TryGetSheetsCount(Excel.Sheets sheets)
+        {
+            if (sheets == null) return 0;
+            try
+            {
+                object value = sheets.GetType().InvokeMember(
+                    "Count",
+                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    sheets,
+                    null);
+
+                if (value is int i) return i;
+                if (value is double d) return (int)d;
+            }
+            catch { }
+
+            return 0;
+        }
+
+        private static Excel.Worksheet TryGetWorksheet(Excel.Sheets sheets, int index)
+        {
+            if (sheets == null) return null;
+            try
+            {
+                return sheets.GetType().InvokeMember(
+                    "Item",
+                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    sheets,
+                    new object[] { index }) as Excel.Worksheet;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Excel.Worksheet TryAddWorksheet(Excel.Sheets sheets)
+        {
+            if (sheets == null) return null;
+            try
+            {
+                int count = TryGetSheetsCount(sheets);
+                object after = sheets.GetType().InvokeMember(
+                    "Item",
+                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    sheets,
+                    new object[] { count });
+
+                return sheets.GetType().InvokeMember(
+                    "Add",
+                    BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    sheets,
+                    new object[] { Type.Missing, after, Type.Missing, Type.Missing }) as Excel.Worksheet;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Close all workbooks (no prompts), quit the app, release RCWs, then double-GC.
         /// </summary>
         private static void SafeQuitExcel(Excel.Application excel)
@@ -628,7 +840,7 @@ namespace MGT
             Excel.Workbooks books = null;
             try
             {
-                books = excel.Workbooks;
+                books = TryGetWorkbooks(excel);
                 for (int i = books.Count; i >= 1; i--)
                 {
                     Excel.Workbook wb = null;
@@ -822,15 +1034,19 @@ namespace MGT
             if (string.IsNullOrWhiteSpace(sheetName)) sheetName = "Sheet1";
 
             Excel.Worksheet ws = null;
+            Excel.Sheets sheets = null;
             try
             {
-                for (int i = 1; i <= wb.Worksheets.Count; i++)
+                sheets = TryGetSheets(wb);
+                int sheetCount = TryGetSheetsCount(sheets);
+
+                for (int i = 1; i <= sheetCount; i++)
                 {
                     Excel.Worksheet s = null;
                     try
                     {
-                        s = (Excel.Worksheet)wb.Worksheets[i];
-                        if (string.Equals(s.Name, sheetName, StringComparison.OrdinalIgnoreCase))
+                        s = TryGetWorksheet(sheets, i);
+                        if (string.Equals(s?.Name, sheetName, StringComparison.OrdinalIgnoreCase))
                         {
                             ws = s; // transfer ownership
                             s = null;
@@ -844,19 +1060,23 @@ namespace MGT
                 }
             }
             catch { }
+            finally
+            {
+                ReleaseCom(sheets);
+            }
 
             if (ws == null)
             {
-                Excel.Sheets sheets = null;
+                Excel.Sheets newSheets = null;
                 try
                 {
-                    sheets = wb.Worksheets;
-                    ws = (Excel.Worksheet)sheets.Add(After: sheets[sheets.Count]);
+                    newSheets = TryGetSheets(wb);
+                    ws = TryAddWorksheet(newSheets);
                     try { ws.Name = sheetName; } catch { }
                 }
                 finally
                 {
-                    ReleaseCom(sheets);
+                    ReleaseCom(newSheets);
                 }
             }
 
