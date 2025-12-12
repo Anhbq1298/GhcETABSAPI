@@ -1067,16 +1067,16 @@ namespace MGT
 
             if (ws == null)
             {
-                Excel.Sheets sheets = null;
+                Excel.Sheets newSheets = null;
                 try
                 {
-                    sheets = TryGetSheets(wb);
-                    ws = TryAddWorksheet(sheets);
+                    newSheets = TryGetSheets(wb);
+                    ws = TryAddWorksheet(newSheets);
                     try { ws.Name = sheetName; } catch { }
                 }
                 finally
                 {
-                    ReleaseCom(sheets);
+                    ReleaseCom(newSheets);
                 }
             }
 
