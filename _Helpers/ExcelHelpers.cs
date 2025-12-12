@@ -46,6 +46,53 @@ namespace MGT
 
         #region Path / COM helpers
 
+        private static T? TryGetProperty<T>(object target, string propertyName) where T : struct
+        {
+            if (target == null || string.IsNullOrWhiteSpace(propertyName)) return null;
+
+            try
+            {
+                object value = target.GetType().InvokeMember(
+                    propertyName,
+                    BindingFlags.GetProperty,
+                    binder: null,
+                    target: target,
+                    args: null);
+
+                if (value is T typed) return typed;
+
+                if (value != null && typeof(T).IsEnum)
+                {
+                    try { return (T)Enum.ToObject(typeof(T), value); } catch { }
+                }
+            }
+            catch
+            {
+                // ignored
+            }
+
+            return null;
+        }
+
+        private static void TrySetProperty(object target, string propertyName, object value)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(propertyName)) return;
+
+            try
+            {
+                target.GetType().InvokeMember(
+                    propertyName,
+                    BindingFlags.SetProperty,
+                    binder: null,
+                    target: target,
+                    args: new object[] { value });
+            }
+            catch
+            {
+                // ignored
+            }
+        }
+
         /// <summary>
         /// Convert a relative path to full path using AppDomain.BaseDirectory.
         /// Returns full path if input is already absolute; null/empty stays null.
@@ -395,8 +442,8 @@ namespace MGT
                     app = new Excel.Application();
                     createdApplication = true;
 
-                    bool prevAlerts = false;
-                    try { prevAlerts = app.DisplayAlerts; app.DisplayAlerts = false; } catch { }
+                    bool prevAlerts = TryGetProperty<bool>(app, nameof(app.DisplayAlerts)) ?? false;
+                    TrySetProperty(app, nameof(app.DisplayAlerts), false);
 
                     try
                     {
@@ -453,13 +500,17 @@ namespace MGT
                     }
                     finally
                     {
-                        try { app.DisplayAlerts = prevAlerts; } catch { }
+                        TrySetProperty(app, nameof(app.DisplayAlerts), prevAlerts);
                     }
 
                     // 2) UI: show; no maximize unless asked; bring to front if requested
                     try
                     {
-                        if (visible) { app.Visible = true; app.UserControl = true; }
+                        if (visible)
+                        {
+                            TrySetProperty(app, nameof(app.Visible), true);
+                            TrySetProperty(app, nameof(app.UserControl), true);
+                        }
                         wb.Activate();
 
                         if (maximizeWindow) MaximizeExcelWindow(app);
@@ -490,7 +541,8 @@ namespace MGT
             try
             {
                 // Make sure Excel is visible and the workbook window is active
-                try { app.Visible = true; app.UserControl = true; } catch { }
+                TrySetProperty(app, nameof(app.Visible), true);
+                TrySetProperty(app, nameof(app.UserControl), true);
                 try
                 {
                     var aw = app.ActiveWindow;
@@ -503,7 +555,7 @@ namespace MGT
                 catch { }
 
                 // Bring main HWND to front
-                IntPtr hwnd = (IntPtr)app.Hwnd;
+                IntPtr hwnd = (IntPtr)(TryGetProperty<int>(app, nameof(app.Hwnd)) ?? 0);
                 if (hwnd != IntPtr.Zero)
                 {
                     ShowWindow(hwnd, SW_RESTORE);
@@ -521,14 +573,14 @@ namespace MGT
             if (app == null) return;
             try
             {
-                try { app.WindowState = Excel.XlWindowState.xlMaximized; } catch { }
+                TrySetProperty(app, nameof(app.WindowState), Excel.XlWindowState.xlMaximized);
                 Excel.Window aw = null;
                 try
                 {
                     aw = app.ActiveWindow;
                     if (aw != null)
                     {
-                        try { aw.WindowState = Excel.XlWindowState.xlMaximized; } catch { }
+                        TrySetProperty(aw, nameof(aw.WindowState), Excel.XlWindowState.xlMaximized);
                     }
                 }
                 catch { }
@@ -537,7 +589,7 @@ namespace MGT
                     if (aw != null) ReleaseCom(aw);
                 }
 
-                IntPtr hwnd = (IntPtr)app.Hwnd;
+                IntPtr hwnd = (IntPtr)(TryGetProperty<int>(app, nameof(app.Hwnd)) ?? 0);
                 if (hwnd != IntPtr.Zero)
                 {
                     ShowWindow(hwnd, SW_RESTORE);
@@ -555,10 +607,10 @@ namespace MGT
         {
             if (excel == null) return;
 
-            bool prevAlerts = false;
-            try { prevAlerts = excel.DisplayAlerts; excel.DisplayAlerts = false; } catch { }
-            try { excel.ScreenUpdating = false; } catch { }
-            try { excel.UserControl = false; } catch { }
+            bool prevAlerts = TryGetProperty<bool>(excel, nameof(excel.DisplayAlerts)) ?? false;
+            TrySetProperty(excel, nameof(excel.DisplayAlerts), false);
+            TrySetProperty(excel, nameof(excel.ScreenUpdating), false);
+            TrySetProperty(excel, nameof(excel.UserControl), false);
 
             Excel.Workbooks books = null;
             try
@@ -693,7 +745,7 @@ namespace MGT
         [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
         private static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
 
-        [DllImport("user232.dll", SetLastError = true)]
+        [DllImport("user32.dll", SetLastError = true)]
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
         [DllImport("user32.dll", SetLastError = true)]
@@ -908,21 +960,21 @@ namespace MGT
             UiState state = new UiState();
             try
             {
-                state.DisplayFullScreen = app.DisplayFullScreen;
-                state.DisplayFormulaBar = app.DisplayFormulaBar;
-                state.DisplayStatusBar = app.DisplayStatusBar;
-                state.ScreenUpdating = app.ScreenUpdating;
-                state.EnableEvents = app.EnableEvents;
+                state.DisplayFullScreen = TryGetProperty<bool>(app, nameof(app.DisplayFullScreen));
+                state.DisplayFormulaBar = TryGetProperty<bool>(app, nameof(app.DisplayFormulaBar));
+                state.DisplayStatusBar = TryGetProperty<bool>(app, nameof(app.DisplayStatusBar));
+                state.ScreenUpdating = TryGetProperty<bool>(app, nameof(app.ScreenUpdating));
+                state.EnableEvents = TryGetProperty<bool>(app, nameof(app.EnableEvents));
 
                 var win = app.ActiveWindow;
                 if (win != null)
                 {
-                    state.DisplayGridlines = win.DisplayGridlines;
-                    state.DisplayHeadings = win.DisplayHeadings;
-                    state.DisplayHorizontalScrollBar = win.DisplayHorizontalScrollBar;
-                    state.DisplayVerticalScrollBar = win.DisplayVerticalScrollBar;
-                    state.DisplayWorkbookTabs = win.DisplayWorkbookTabs;
-                    state.Zoom = win.Zoom is int z ? z : (int?)null;
+                    state.DisplayGridlines = TryGetProperty<bool>(win, nameof(win.DisplayGridlines));
+                    state.DisplayHeadings = TryGetProperty<bool>(win, nameof(win.DisplayHeadings));
+                    state.DisplayHorizontalScrollBar = TryGetProperty<bool>(win, nameof(win.DisplayHorizontalScrollBar));
+                    state.DisplayVerticalScrollBar = TryGetProperty<bool>(win, nameof(win.DisplayVerticalScrollBar));
+                    state.DisplayWorkbookTabs = TryGetProperty<bool>(win, nameof(win.DisplayWorkbookTabs));
+                    state.Zoom = TryGetProperty<int>(win, nameof(win.Zoom));
                 }
             }
             catch { }
@@ -930,39 +982,39 @@ namespace MGT
             // Hide chrome + zoom to selection
             try
             {
-                app.ScreenUpdating = true;
-                app.EnableEvents = false;
+                TrySetProperty(app, nameof(app.ScreenUpdating), true);
+                TrySetProperty(app, nameof(app.EnableEvents), false);
 
                 // Hide Ribbon (Excel4 macro)
                 try { app.ExecuteExcel4Macro(@"SHOW.TOOLBAR(""Ribbon"",False)"); } catch { }
 
-                app.DisplayFormulaBar = false;
-                app.DisplayStatusBar = false;
+                TrySetProperty(app, nameof(app.DisplayFormulaBar), false);
+                TrySetProperty(app, nameof(app.DisplayStatusBar), false);
 
                 var win = app.ActiveWindow;
                 if (win != null)
                 {
                     // Hide most chrome but KEEP sheet tabs
-                    win.DisplayGridlines = false;
-                    win.DisplayHeadings = false;
-                    win.DisplayHorizontalScrollBar = false;
-                    win.DisplayVerticalScrollBar = false;
-                    win.DisplayWorkbookTabs = true; // keep visible
+                    TrySetProperty(win, nameof(win.DisplayGridlines), false);
+                    TrySetProperty(win, nameof(win.DisplayHeadings), false);
+                    TrySetProperty(win, nameof(win.DisplayHorizontalScrollBar), false);
+                    TrySetProperty(win, nameof(win.DisplayVerticalScrollBar), false);
+                    TrySetProperty(win, nameof(win.DisplayWorkbookTabs), true); // keep visible
 
                     // Zoom-to-selection without office.dll
                     TryExecuteMso(app, "ZoomToSelection");
 
                     // Fallback zoom if ExecuteMso not available
-                    try { if (!(win.Zoom is int)) win.Zoom = 120; } catch { }
+                    try { if (!(win.Zoom is int)) TrySetProperty(win, nameof(win.Zoom), 120); } catch { }
                 }
 
                 // Do NOT force FullScreen unless requested
-                app.DisplayFullScreen = makeFullScreen;
+                TrySetProperty(app, nameof(app.DisplayFullScreen), makeFullScreen);
             }
             catch { }
             finally
             {
-                try { app.EnableEvents = true; } catch { }
+                TrySetProperty(app, nameof(app.EnableEvents), true);
             }
 
             // Scroll to top-left of range
@@ -987,11 +1039,11 @@ namespace MGT
         {
             if (app == null || state == null) return;
 
-            try { app.ScreenUpdating = state.ScreenUpdating ?? true; } catch { }
-            try { app.EnableEvents = state.EnableEvents ?? true; } catch { }
-            try { app.DisplayFullScreen = state.DisplayFullScreen ?? false; } catch { }
-            try { app.DisplayFormulaBar = state.DisplayFormulaBar ?? true; } catch { }
-            try { app.DisplayStatusBar = state.DisplayStatusBar ?? true; } catch { }
+            TrySetProperty(app, nameof(app.ScreenUpdating), state.ScreenUpdating ?? true);
+            TrySetProperty(app, nameof(app.EnableEvents), state.EnableEvents ?? true);
+            TrySetProperty(app, nameof(app.DisplayFullScreen), state.DisplayFullScreen ?? false);
+            TrySetProperty(app, nameof(app.DisplayFormulaBar), state.DisplayFormulaBar ?? true);
+            TrySetProperty(app, nameof(app.DisplayStatusBar), state.DisplayStatusBar ?? true);
 
             // Show Ribbon back
             try { app.ExecuteExcel4Macro(@"SHOW.TOOLBAR(""Ribbon"",True)"); } catch { }
@@ -1001,12 +1053,12 @@ namespace MGT
                 var win = app.ActiveWindow;
                 if (win != null)
                 {
-                    if (state.DisplayGridlines != null) win.DisplayGridlines = state.DisplayGridlines.Value;
-                    if (state.DisplayHeadings != null) win.DisplayHeadings = state.DisplayHeadings.Value;
-                    if (state.DisplayHorizontalScrollBar != null) win.DisplayHorizontalScrollBar = state.DisplayHorizontalScrollBar.Value;
-                    if (state.DisplayVerticalScrollBar != null) win.DisplayVerticalScrollBar = state.DisplayVerticalScrollBar.Value;
-                    if (state.DisplayWorkbookTabs != null) win.DisplayWorkbookTabs = state.DisplayWorkbookTabs.Value;
-                    if (state.Zoom != null) win.Zoom = state.Zoom.Value;
+                    if (state.DisplayGridlines != null) TrySetProperty(win, nameof(win.DisplayGridlines), state.DisplayGridlines.Value);
+                    if (state.DisplayHeadings != null) TrySetProperty(win, nameof(win.DisplayHeadings), state.DisplayHeadings.Value);
+                    if (state.DisplayHorizontalScrollBar != null) TrySetProperty(win, nameof(win.DisplayHorizontalScrollBar), state.DisplayHorizontalScrollBar.Value);
+                    if (state.DisplayVerticalScrollBar != null) TrySetProperty(win, nameof(win.DisplayVerticalScrollBar), state.DisplayVerticalScrollBar.Value);
+                    if (state.DisplayWorkbookTabs != null) TrySetProperty(win, nameof(win.DisplayWorkbookTabs), state.DisplayWorkbookTabs.Value);
+                    if (state.Zoom != null) TrySetProperty(win, nameof(win.Zoom), state.Zoom.Value);
                 }
             }
             catch { }
