@@ -42,10 +42,21 @@
 	</ItemGroup>
 
 	<!-- Grasshopper SDK for compile-time only (Rhino provides runtime) -->
+	<PropertyGroup>
+		<OfficeInteropVersion>16.0.18925.20022</OfficeInteropVersion>
+	</PropertyGroup>
+
 	<ItemGroup>
 		<PackageReference Include="Grasshopper" Version="8.0.23304.9001" ExcludeAssets="runtime" />
-		<PackageReference Include="Microsoft.Graph.Core" Version="3.2.4" />
-		<PackageReference Include="Microsoft.Office.Interop.Excel" Version="16.0.18925.20022" />
+		<PackageReference Include="Microsoft.Office.Interop.Excel" Version="$(OfficeInteropVersion)" />
+	</ItemGroup>
+
+	<!-- Explicitly pull in office.dll so deployments do not miss the PIA dependency -->
+	<ItemGroup>
+		<Reference Include="office">
+			<HintPath>$(PkgMicrosoft_Office_Interop_Excel)\lib\net8.0\office.dll</HintPath>
+			<Private>true</Private>
+		</Reference>
 	</ItemGroup>
 
 	<!-- ETABS COM Interop: DO NOT embed; copy DLL next to the .gha -->
