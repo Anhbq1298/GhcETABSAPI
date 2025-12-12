@@ -574,10 +574,11 @@ namespace MGT
                     ExcelHelpers.ReleaseCom(clearRng);
 
                     // 5) Write headers at row 1 (B1:E1)
-                    ws.Cells[1, StartColumn].Value2 = "UniqueName";
-                    ws.Cells[1, StartColumn + 1].Value2 = "X";
-                    ws.Cells[1, StartColumn + 2].Value2 = "Y";
-                    ws.Cells[1, StartColumn + 3].Value2 = "Z";
+
+                    ((Excel.Range)ws.Cells[1, StartColumn]).Value2 = "UniqueName";
+                    ((Excel.Range)ws.Cells[1, StartColumn + 1]).Value2 = "X";
+                    ((Excel.Range)ws.Cells[1, StartColumn + 2]).Value2 = "Y";
+                    ((Excel.Range)ws.Cells[1, StartColumn + 3]).Value2 = "Z";
 
                     // 6) Write values starting row 2
                     if (points.Count > 0)
