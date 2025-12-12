@@ -197,12 +197,11 @@ namespace MGT
 
             try
             {
-                app = new Excel.Application
-                {
-                    Visible = false,
-                    DisplayAlerts = false,
-                    UserControl = false
-                };
+                app = new Excel.Application();
+
+                TrySetApplicationBool(app, "Visible", false);
+                TrySetApplicationBool(app, "DisplayAlerts", false);
+                TrySetApplicationBool(app, "UserControl", false);
 
                 books = app.Workbooks;
                 wb = books.Open(
@@ -395,8 +394,8 @@ namespace MGT
                     app = new Excel.Application();
                     createdApplication = true;
 
-                    bool prevAlerts = false;
-                    try { prevAlerts = app.DisplayAlerts; app.DisplayAlerts = false; } catch { }
+                    bool prevAlerts = TryGetApplicationBool(app, "DisplayAlerts") ?? false;
+                    TrySetApplicationBool(app, "DisplayAlerts", false);
 
                     try
                     {
@@ -453,7 +452,7 @@ namespace MGT
                     }
                     finally
                     {
-                        try { app.DisplayAlerts = prevAlerts; } catch { }
+                        TrySetApplicationBool(app, "DisplayAlerts", prevAlerts);
                     }
 
                     // 2) UI: show; no maximize unless asked; bring to front if requested
@@ -566,6 +565,50 @@ namespace MGT
                     ShowWindow(hwnd, SW_MAXIMIZE);
                     SetForegroundWindow(hwnd);
                 }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Late-bind a boolean property on Excel.Application (returns null if unavailable).
+        /// Avoids compile-time dependency on interop members that may be missing.
+        /// </summary>
+        private static bool? TryGetApplicationBool(Excel.Application app, string propertyName)
+        {
+            if (app == null || string.IsNullOrWhiteSpace(propertyName)) return null;
+
+            try
+            {
+                object value = app.GetType().InvokeMember(
+                    propertyName,
+                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    app,
+                    null);
+
+                if (value is bool b) return b;
+                if (value is int i) return i != 0;
+            }
+            catch { }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Late-bind a boolean property setter on Excel.Application (safe no-op on failure).
+        /// </summary>
+        private static void TrySetApplicationBool(Excel.Application app, string propertyName, bool value)
+        {
+            if (app == null || string.IsNullOrWhiteSpace(propertyName)) return;
+
+            try
+            {
+                app.GetType().InvokeMember(
+                    propertyName,
+                    BindingFlags.SetProperty | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    app,
+                    new object[] { value });
             }
             catch { }
         }
