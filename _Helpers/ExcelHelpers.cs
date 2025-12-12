@@ -535,43 +535,6 @@ namespace MGT
             }
         }
 
-        private static bool? TryGetApplicationBool(Excel.Application app, string propertyName)
-        {
-            if (app == null || string.IsNullOrWhiteSpace(propertyName)) return null;
-            try
-            {
-                object value = app.GetType().InvokeMember(
-                    propertyName,
-                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    app,
-                    null);
-                return value as bool? ?? (value is bool b ? b : (bool?)null);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static void TrySetApplicationBool(Excel.Application app, string propertyName, bool value)
-        {
-            if (app == null || string.IsNullOrWhiteSpace(propertyName)) return;
-            try
-            {
-                app.GetType().InvokeMember(
-                    propertyName,
-                    BindingFlags.SetProperty | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    app,
-                    new object[] { value });
-            }
-            catch
-            {
-                // no-op
-            }
-        }
-
         /// <summary>
         /// Maximize Excel UI window(s) reliably (MDI/SDI): Application & ActiveWindow + Win32.
         /// </summary>
