@@ -416,7 +416,7 @@ namespace MGT
                                 Excel.Window window = null;
                                 try
                                 {
-                                    window = app.ActiveWindow;
+                                    window = TryGetActiveWindow(app);
                                     if (window != null) window.Caption = "temp";
                                 }
                                 finally { if (window != null) ReleaseCom(window); }
@@ -493,7 +493,7 @@ namespace MGT
                 try { app.Visible = true; app.UserControl = true; } catch { }
                 try
                 {
-                    var aw = app.ActiveWindow;
+                    var aw = TryGetActiveWindow(app);
                     if (aw != null)
                     {
                         try { aw.Activate(); } catch { }
@@ -514,6 +514,28 @@ namespace MGT
         }
 
         /// <summary>
+        /// Safely access Excel.Application.ActiveWindow even when interop definitions omit it.
+        /// </summary>
+        private static Excel.Window TryGetActiveWindow(Excel.Application app)
+        {
+            if (app == null) return null;
+            try
+            {
+                object aw = app.GetType().InvokeMember(
+                    "ActiveWindow",
+                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    app,
+                    null);
+                return aw as Excel.Window;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Maximize Excel UI window(s) reliably (MDI/SDI): Application & ActiveWindow + Win32.
         /// </summary>
         private static void MaximizeExcelWindow(Excel.Application app)
@@ -525,7 +547,7 @@ namespace MGT
                 Excel.Window aw = null;
                 try
                 {
-                    aw = app.ActiveWindow;
+                    aw = TryGetActiveWindow(app);
                     if (aw != null)
                     {
                         try { aw.WindowState = Excel.XlWindowState.xlMaximized; } catch { }
@@ -914,7 +936,7 @@ namespace MGT
                 state.ScreenUpdating = app.ScreenUpdating;
                 state.EnableEvents = app.EnableEvents;
 
-                var win = app.ActiveWindow;
+                var win = TryGetActiveWindow(app);
                 if (win != null)
                 {
                     state.DisplayGridlines = win.DisplayGridlines;
@@ -939,7 +961,7 @@ namespace MGT
                 app.DisplayFormulaBar = false;
                 app.DisplayStatusBar = false;
 
-                var win = app.ActiveWindow;
+                var win = TryGetActiveWindow(app);
                 if (win != null)
                 {
                     // Hide most chrome but KEEP sheet tabs
@@ -968,7 +990,7 @@ namespace MGT
             // Scroll to top-left of range
             try
             {
-                var win = app.ActiveWindow;
+                var win = TryGetActiveWindow(app);
                 if (win != null)
                 {
                     win.ScrollRow = dataRange.Row;
@@ -998,7 +1020,7 @@ namespace MGT
 
             try
             {
-                var win = app.ActiveWindow;
+                var win = TryGetActiveWindow(app);
                 if (win != null)
                 {
                     if (state.DisplayGridlines != null) win.DisplayGridlines = state.DisplayGridlines.Value;
