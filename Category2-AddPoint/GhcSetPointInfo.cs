@@ -2,7 +2,7 @@
 // Component : GhcSetPointInfo
 // Author    : Anh Bui
 // Target    : Rhino 7/8 + Grasshopper, .NET 8.0 (x64)
-// Depends   : Grasshopper, ETABSv1 (COM)
+// Depends   : Grasshopper, ETABSv1 (COM), Microsoft.Office.Interop.Excel
 // Panel     : "MGT" / "2.0 Point Object Modelling"
 // -------------------------------------------------------------
 // Inputs (ordered):
@@ -25,13 +25,14 @@
 //   • MOVE    → If UniqueName exists and |Δ|≥tol between current and target XYZ
 //               (blank Excel cells keep current coordinate).
 //   • RENAME  → (a) Case-only mismatch → ChangeName(oldExact, desiredExcelName).
-//               (b) If desired name not found but another point sits at target coords,
+//               (b) If desired name missing but another point sits at target coords,
 //                   ChangeName(thatPointName, desiredExcelName) instead of creating.
 //   • DELETE  → If a name exists in baseline but is missing from Excel AND has no
 //               connectivity; use PointObj.DeleteSpecialPoint(name).
 //   • Reader skips fully blank rows and processes until UsedRange end.
 //   • Dual progress bars (Excel + Assignment) always reach 100%.
-//   • After apply, this component **auto-refreshes GhcGetPointInfo**.
+//   • After apply: (1) auto-refresh GhcGetPointInfo, then (2) write back the Excel sheet
+//     with the NEW baseline (scanned from ETABS), bring Excel to front (normal window).
 // -------------------------------------------------------------
 
 using System;
@@ -45,6 +46,7 @@ using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
 using static MGT.ComponentShared;
+using Excel = Microsoft.Office.Interop.Excel;
 
 namespace MGT
 {
@@ -188,13 +190,19 @@ namespace MGT
                     UiHelpers.UpdateAssignmentProgressBar(rows.Count, rows.Count, FormatAssignStatus(rows.Count, rows.Count));
                 }
 
-                // Non-fatal view refresh
+                // Non-fatal ETABS view refresh
                 try { sap.View.RefreshView(0, false); } catch { /* ignore */ }
 
-                // === Auto-refresh GhcGetPointInfo after applying updates ===
+                // === 1) Auto-refresh GhcGetPointInfo ===
                 int refreshed = TriggerGetPointInfoRefresh();
-                if (refreshed > 0)
-                    messages.Add($"Scheduled refresh for {refreshed} Get Point Info component(s).");
+                if (refreshed > 0) messages.Add($"Scheduled refresh for {refreshed} Get Point Info component(s).");
+
+                // === 2) Write back Excel from NEW baseline (scan ETABS now) ===
+                int written = WriteBackExcelFromModel(sap, fullPath, sheet, out int nRowsWritten, out string excelMsg);
+                if (written == 0)
+                    messages.Add($"Excel updated with new baseline ({nRowsWritten} row(s)). {excelMsg}");
+                else
+                    messages.Add($"Excel update warning: {excelMsg}");
             }
             catch (Exception ex)
             {
@@ -245,7 +253,7 @@ namespace MGT
 
             void Tick() => progress?.Invoke(++processed, total, FormatAssignStatus(processed, total));
 
-            // ===== PASS 1: RENAME(Case) + MOVE + CREATE / RENAME(By-Coordinate) =====
+            // ===== PASS 1: RENAME (Case) + MOVE + CREATE / RENAME (By-Coordinate) =====
             foreach (var (row, idx) in rows.WithIndex())
             {
                 string rowLabel = $"Row {StartRow + idx}";
@@ -525,42 +533,163 @@ namespace MGT
         }
 
         // =========================================================
+        // Write-back Excel with NEW baseline (scan ETABS after apply)
+        // =========================================================
+        private static int WriteBackExcelFromModel(
+            cSapModel sap,
+            string workbookFullPath,
+            string sheetName,
+            out int nRowsWritten,
+            out string message)
+        {
+            nRowsWritten = 0;
+            message = "OK";
+
+            try
+            {
+                // 1) Scan ETABS for all points (name + current XYZ)
+                var points = ScanEtabsPoints(sap); // returns list sorted by name ASC
+                nRowsWritten = points.Count;
+
+                // 2) Attach/Open Excel
+                Excel.Application app = null;
+                Excel.Workbook wb = null;
+                if (!ExcelHelpers.AttachOrOpenWorkbook(out app, out wb, workbookFullPath, visible: true, readOnly: false) || app == null || wb == null)
+                {
+                    message = "Failed to attach/open Excel workbook.";
+                    return -1;
+                }
+
+                Excel.Worksheet ws = null;
+                try
+                {
+                    // 3) Get or add target worksheet
+                    ws = GetOrAddWorksheet(wb, sheetName);
+
+                    // 4) Clear existing data area (B2:E[lastRow])
+                    int lastRow = TryGetLastUsedRow(ws);
+                    if (lastRow < 2) lastRow = 2;
+                    Excel.Range clearRng = ws.Range[ws.Cells[StartRow, StartColumn], ws.Cells[lastRow, StartColumn + 3]];
+                    try { clearRng.ClearContents(); } catch { }
+                    ExcelHelpers.ReleaseCom(clearRng);
+
+                    // 5) Write headers at row 1 (B1:E1)
+                    ws.Cells[1, StartColumn].Value2 = "UniqueName";
+                    ws.Cells[1, StartColumn + 1].Value2 = "X";
+                    ws.Cells[1, StartColumn + 2].Value2 = "Y";
+                    ws.Cells[1, StartColumn + 3].Value2 = "Z";
+
+                    // 6) Write values starting row 2
+                    if (points.Count > 0)
+                    {
+                        object[,] arr = new object[points.Count, 4];
+                        for (int i = 0; i < points.Count; i++)
+                        {
+                            var p = points[i];
+                            arr[i, 0] = p.UniqueName;
+                            arr[i, 1] = p.X;
+                            arr[i, 2] = p.Y;
+                            arr[i, 3] = p.Z;
+                        }
+
+                        Excel.Range dst = ws.Range[
+                            ws.Cells[StartRow, StartColumn],
+                            ws.Cells[StartRow + points.Count - 1, StartColumn + 3]
+                        ];
+                        dst.Value2 = arr;
+                        ExcelHelpers.ReleaseCom(dst);
+                    }
+
+                    // 7) Make Excel frontmost, normal window (not maximized) and save
+                    try { app.Visible = true; } catch { }
+                    try { app.UserControl = true; } catch { }
+                    try { app.WindowState = Excel.XlWindowState.xlNormal; } catch { }
+                    try { ws.Activate(); } catch { }
+                    try { wb.Save(); } catch { /* allow readonly */ }
+
+                    message = "Excel window brought to front.";
+                }
+                finally
+                {
+                    ExcelHelpers.ReleaseCom(ws);
+                    ExcelHelpers.ReleaseCom(wb);
+                    ExcelHelpers.ReleaseCom(app);
+                }
+
+                return 0; // success
+            }
+            catch (Exception ex)
+            {
+                message = ex.Message;
+                return -2;
+            }
+        }
+
+        private static Excel.Worksheet GetOrAddWorksheet(Excel.Workbook wb, string sheetName)
+        {
+            foreach (Excel.Worksheet w in wb.Worksheets)
+            {
+                try
+                {
+                    if (string.Equals(w.Name, sheetName, StringComparison.OrdinalIgnoreCase))
+                        return w;
+                }
+                catch { /* ignore */ }
+                finally { /* do not release here; we return one */ }
+            }
+
+            // Add new at end if not found
+            Excel.Worksheet added = (Excel.Worksheet)wb.Worksheets.Add(After: wb.Worksheets[wb.Worksheets.Count]);
+            try { added.Name = sheetName; } catch { /* name collision → Excel will assign */ }
+            return added;
+        }
+
+        private static int TryGetLastUsedRow(Excel.Worksheet ws)
+        {
+            try
+            {
+                var cell = ws.Cells.Find(
+                    What: "*",
+                    After: ws.Cells[1, 1],
+                    LookIn: Excel.XlFindLookIn.xlFormulas,
+                    LookAt: Excel.XlLookAt.xlPart,
+                    SearchOrder: Excel.XlSearchOrder.xlByRows,
+                    SearchDirection: Excel.XlSearchDirection.xlPrevious,
+                    MatchCase: false);
+                int r = cell != null ? cell.Row : 1;
+                ExcelHelpers.ReleaseCom(cell);
+                return r;
+            }
+            catch { return 1; }
+        }
+
+        private static List<PointRow> ScanEtabsPoints(cSapModel sap)
+        {
+            var list = new List<PointRow>();
+            int n = 0;
+            string[] names = null;
+            if (sap.PointObj.GetNameList(ref n, ref names) != 0 || names == null) return list;
+
+            for (int i = 0; i < n; i++)
+            {
+                string nm = names[i];
+                if (string.IsNullOrWhiteSpace(nm)) continue;
+
+                double x = 0, y = 0, z = 0;
+                if (sap.PointObj.GetCoordCartesian(nm, ref x, ref y, ref z) == 0)
+                {
+                    list.Add(new PointRow { UniqueName = nm.Trim(), X = x, Y = y, Z = z });
+                }
+            }
+
+            // Normalize order by UniqueName (index-agnostic)
+            list.Sort((a, b) => string.Compare(a.UniqueName ?? "", b.UniqueName ?? "", StringComparison.OrdinalIgnoreCase));
+            return list;
+        }
+
+        // =========================================================
         // Helpers & Utilities
         // =========================================================
-
-        private static string FormatAssignStatus(int processed, int total)
-        {
-            if (total <= 0) return "Updating ETABS points 0 of 0 row(s) (100%).";
-            int p = Math.Max(0, Math.Min(processed, total));
-            double percent = (p * 100.0) / total;
-            return $"Updating ETABS points {p} of {total} row(s) ({percent:0.##}%).";
-        }
-
-        private static GH_Structure<GH_ObjectWrapper> BuildValueTree(List<PointRow> rows)
-        {
-            var tree = new GH_Structure<GH_ObjectWrapper>();
-            GH_Path pName = new GH_Path(0);
-            GH_Path pX = new GH_Path(1);
-            GH_Path pY = new GH_Path(2);
-            GH_Path pZ = new GH_Path(3);
-
-            foreach (var r in rows)
-            {
-                tree.Append(new GH_ObjectWrapper(r.UniqueName), pName);
-                tree.Append(new GH_ObjectWrapper(r.X), pX);
-                tree.Append(new GH_ObjectWrapper(r.Y), pY);
-                tree.Append(new GH_ObjectWrapper(r.Z), pZ);
-            }
-            return tree;
-        }
-
-        /// <summary>
-        /// Scan ETABS once and build fast lookup indices:
-        ///  - nameSet:       case-insensitive set of names
-        ///  - coordSigSet:   set of rounded XYZ signatures
-        ///  - nameToCoord:   exact coordinates by exact name (key preserves casing)
-        ///  - coordSigToName:reverse index: signature → representative name
-        /// </summary>
         private static void BuildEtabsPointIndices(
             cSapModel sap,
             out HashSet<string> nameSet,
@@ -639,6 +768,32 @@ namespace MGT
         private static string CoordSig(double x, double y, double z)
             => $"{Math.Round(x, 6)}|{Math.Round(y, 6)}|{Math.Round(z, 6)}";
 
+        private static string FormatAssignStatus(int processed, int total)
+        {
+            if (total <= 0) return "Updating ETABS points 0 of 0 row(s) (100%).";
+            int p = Math.Max(0, Math.Min(processed, total));
+            double percent = (p * 100.0) / total;
+            return $"Updating ETABS points {p} of {total} row(s) ({percent:0.##}%).";
+        }
+
+        private static GH_Structure<GH_ObjectWrapper> BuildValueTree(List<PointRow> rows)
+        {
+            var tree = new GH_Structure<GH_ObjectWrapper>();
+            GH_Path pName = new GH_Path(0);
+            GH_Path pX = new GH_Path(1);
+            GH_Path pY = new GH_Path(2);
+            GH_Path pZ = new GH_Path(3);
+
+            foreach (var r in rows)
+            {
+                tree.Append(new GH_ObjectWrapper(r.UniqueName), pName);
+                tree.Append(new GH_ObjectWrapper(r.X), pX);
+                tree.Append(new GH_ObjectWrapper(r.Y), pY);
+                tree.Append(new GH_ObjectWrapper(r.Z), pZ);
+            }
+            return tree;
+        }
+
         private static string ReadText(object value)
         {
             if (value == null) return string.Empty;
@@ -666,7 +821,7 @@ namespace MGT
             GH_Document doc = OnPingDocument();
             if (doc == null) return 0;
 
-            // Collect strong-typed GhcGetPointInfo first (fast & exact)
+            // Strong-typed refresh
             var targets = new List<GhcGetPointInfo>();
             foreach (IGH_DocumentObject obj in doc.Objects)
             {
@@ -674,22 +829,21 @@ namespace MGT
                     targets.Add(g);
             }
 
-            // Fallback: also refresh any GH_Component named "Get Point Info" (defensive)
+            // Defensive fallback by name
             var fallback = new List<GH_Component>();
             foreach (IGH_DocumentObject obj in doc.Objects)
             {
                 if (obj is GH_Component c && !c.Locked && !c.Hidden &&
-                    string.Equals(c.Name, "Get Point Info", StringComparison.OrdinalIgnoreCase))
+                    string.Equals(c.Name, "Get Point Info", StringComparison.OrdinalIgnoreCase) &&
+                    c is not GhcGetPointInfo)
                 {
-                    // Avoid duplicates if GhcGetPointInfo already captured
-                    if (c is not GhcGetPointInfo) fallback.Add(c);
+                    fallback.Add(c);
                 }
             }
 
             int total = targets.Count + fallback.Count;
             if (total == 0) return 0;
 
-            // Schedule a small deferred refresh so Grasshopper UI can repaint cleanly
             doc.ScheduleSolution(5, _ =>
             {
                 foreach (var g in targets) g.ExpireSolution(false);
