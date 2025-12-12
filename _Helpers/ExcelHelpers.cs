@@ -1333,6 +1333,7 @@ namespace MGT
             Excel.Range topLeft = null, bottomRight = null, fullBlock = null;
             Excel.Range headerRight = null, headerRow = null;
             Excel.Range dataRange = null;
+            Excel.Application excelApp = null;
 
             try
             {
@@ -1428,7 +1429,6 @@ namespace MGT
                 try
                 {
                     ws.Activate();
-                    Excel.Application excelApp = ws.Application;
 
                     if (maximizeWindow) MaximizeExcelWindow(excelApp); // opt-in
                     try { excelApp.Goto(topLeft, true); } catch { }
@@ -1436,6 +1436,7 @@ namespace MGT
                     if (bringToFront) BringExcelToFront(excelApp);
                 }
                 catch { }
+                // Activate sheet; optional maximize; optional bring-to-front
 
                 // Kiosk view without table (keep sheet tabs; optional fullscreen)
                 if (applyKioskView)
