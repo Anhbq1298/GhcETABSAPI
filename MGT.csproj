@@ -18,21 +18,11 @@
 	</PropertyGroup>
 
 	<!-- Excel COM Interop (Windows only) -->
-	<ItemGroup>
-		<COMReference Include="Microsoft.Office.Interop.Excel">
-			<WrapperTool>tlbimp</WrapperTool>
-			<VersionMajor>1</VersionMajor>
-			<VersionMinor>9</VersionMinor>
-			<Guid>00020813-0000-0000-C000-000000000046</Guid>
-			<Lcid>0</Lcid>
-			<Isolated>false</Isolated>
-			<EmbedInteropTypes>true</EmbedInteropTypes>
-		</COMReference>
-	</ItemGroup>
 
 	<!-- Grasshopper SDK for compile-time only (Rhino provides runtime) -->
 	<ItemGroup>
 		<PackageReference Include="Grasshopper" Version="8.0.23304.9001" ExcludeAssets="runtime" />
+		<PackageReference Include="Microsoft.Office.Interop.Excel" Version="16.0.18925.20022" />
 	</ItemGroup>
 
 	<!-- ETABS COM Interop: DO NOT embed; copy DLL next to the .gha -->
@@ -66,20 +56,6 @@
 
 	<!-- Post-build: copy .gha (+interop DLLs if present) to Grasshopper\Libraries -->
 	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
-		<Exec Command=":: Resolve GH Libraries folder
-if not &quot;%25GH_LIB%25&quot;==&quot;&quot; goto gh_lib_ready
-if not &quot;%25APPDATA%25&quot;==&quot;&quot; set &quot;GH_LIB=%25APPDATA%25\Grasshopper\Libraries&quot; &amp; goto gh_lib_ready
-if not &quot;%25USERPROFILE%25&quot;==&quot;&quot; set &quot;GH_LIB=%25USERPROFILE%25\AppData\Roaming\Grasshopper\Libraries&quot; &amp; goto gh_lib_ready
-echo Failed to determine Grasshopper library folder.&amp;exit /b 1
-:gh_lib_ready
-if not exist &quot;%25GH_LIB%25&quot; mkdir &quot;%25GH_LIB%25&quot;
-
-copy /y &quot;$(TargetPath)&quot; &quot;%25GH_LIB%25\$(TargetName).gha&quot;
-if exist &quot;$(TargetDir)$(TargetName).pdb&quot; copy /y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;%25GH_LIB%25\$(TargetName).pdb&quot;
-
-for %25%25F in (ETABSv1.dll Interop.ETABSv1.dll AxInterop.ETABSv1.dll) do (
-  if exist &quot;$(TargetDir)%25%25F&quot; copy /y &quot;$(TargetDir)%25%25F&quot; &quot;%25GH_LIB%25&quot;
-)
-" />
+		<Exec Command=":: Resolve GH Libraries folder&#xD;&#xA;if not &quot;%25GH_LIB%25&quot;==&quot;&quot; goto gh_lib_ready&#xD;&#xA;if not &quot;%25APPDATA%25&quot;==&quot;&quot; set &quot;GH_LIB=%25APPDATA%25\Grasshopper\Libraries&quot; &amp; goto gh_lib_ready&#xD;&#xA;if not &quot;%25USERPROFILE%25&quot;==&quot;&quot; set &quot;GH_LIB=%25USERPROFILE%25\AppData\Roaming\Grasshopper\Libraries&quot; &amp; goto gh_lib_ready&#xD;&#xA;echo Failed to determine Grasshopper library folder.&amp;exit /b 1&#xD;&#xA;:gh_lib_ready&#xD;&#xA;if not exist &quot;%25GH_LIB%25&quot; mkdir &quot;%25GH_LIB%25&quot;&#xD;&#xA;&#xD;&#xA;copy /y &quot;$(TargetPath)&quot; &quot;%25GH_LIB%25\$(TargetName).gha&quot;&#xD;&#xA;if exist &quot;$(TargetDir)$(TargetName).pdb&quot; copy /y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;%25GH_LIB%25\$(TargetName).pdb&quot;&#xD;&#xA;&#xD;&#xA;for %25%25F in (ETABSv1.dll Interop.ETABSv1.dll AxInterop.ETABSv1.dll) do (&#xD;&#xA;  if exist &quot;$(TargetDir)%25%25F&quot; copy /y &quot;$(TargetDir)%25%25F&quot; &quot;%25GH_LIB%25&quot;&#xD;&#xA;)&#xD;&#xA;" />
 	</Target>
 </Project>
