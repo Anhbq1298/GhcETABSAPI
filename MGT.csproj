@@ -1,58 +1,50 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+
 	<PropertyGroup>
 		<TargetFramework>net8.0-windows</TargetFramework>
 		<TargetExt>.gha</TargetExt>
+
 		<EnableDynamicLoading>true</EnableDynamicLoading>
 		<EnableWindowsTargeting>true</EnableWindowsTargeting>
 		<UseWindowsForms>true</UseWindowsForms>
+
 		<PlatformTarget>x64</PlatformTarget>
 		<Prefer32Bit>false</Prefer32Bit>
-		<NoWarn>NU1701;NETSDK1086</NoWarn>
-	</PropertyGroup>
 
-	<PropertyGroup>
+		<!-- Ensures deps.json + runtimeconfig.json are generated (useful for net8 plugins) -->
+		<GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+
+		<!-- Copy NuGet runtime assemblies to output folder (so GH can load them) -->
+		<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+
+		<NoWarn>NU1701;NETSDK1086</NoWarn>
+
 		<Version>1.0</Version>
 		<Title>MGT</Title>
 		<Company>Meinhardt</Company>
 		<Description>Meinhardt Grasshopper Tool</Description>
 	</PropertyGroup>
 
-	<!-- Excel COM Interop (Windows only) -->
+	<!-- Office PIAs (from GAC / Office installation) -->
+	<!-- IMPORTANT:
+       - Include="office" is the assembly name for office.dll (Microsoft Office Core).
+       - Private=true forces copy to output so GH can resolve at runtime. -->
 	<ItemGroup>
-		<COMReference Include="Microsoft.Office.Interop.Excel">
-			<WrapperTool>tlbimp</WrapperTool>
-			<VersionMajor>1</VersionMajor>
-			<VersionMinor>9</VersionMinor>
-			<Guid>00020813-0000-0000-C000-000000000046</Guid>
-			<Lcid>0</Lcid>
-			<Isolated>false</Isolated>
-			<EmbedInteropTypes>true</EmbedInteropTypes>
-		</COMReference>
+		<Reference Include="office">
+			<EmbedInteropTypes>false</EmbedInteropTypes>
+			<Private>true</Private>
+		</Reference>
+
+		<Reference Include="Microsoft.Office.Interop.Excel">
+			<EmbedInteropTypes>false</EmbedInteropTypes>
+			<Private>true</Private>
+		</Reference>
 	</ItemGroup>
 
 	<!-- Grasshopper SDK for compile-time only (Rhino provides runtime) -->
 	<ItemGroup>
 		<PackageReference Include="Grasshopper" Version="8.0.23304.9001" ExcludeAssets="runtime" />
-	</ItemGroup>
-			<Lcid>0</Lcid>
-			<Isolated>false</Isolated>
-			<EmbedInteropTypes>true</EmbedInteropTypes>
-		</COMReference>
-	</ItemGroup>
-
-	<!-- Grasshopper SDK for compile-time only (Rhino provides runtime) -->
-	<ItemGroup>
-		<PackageReference Include="Grasshopper" Version="8.0.23304.9001" ExcludeAssets="runtime" />
-	</ItemGroup>
-			<Lcid>0</Lcid>
-			<Isolated>false</Isolated>
-			<EmbedInteropTypes>true</EmbedInteropTypes>
-		</COMReference>
-	</ItemGroup>
-
-	<!-- Grasshopper SDK for compile-time only (Rhino provides runtime) -->
-	<ItemGroup>
-		<PackageReference Include="Grasshopper" Version="8.0.23304.9001" ExcludeAssets="runtime" />
+		<PackageReference Include="Microsoft.Office.Interop.Excel" Version="16.0.18925.20022" />
 	</ItemGroup>
 
 	<!-- ETABS COM Interop: DO NOT embed; copy DLL next to the .gha -->
@@ -66,7 +58,7 @@
 
 	<!-- Resources -->
 	<ItemGroup>
-		<Compile Update="Properties\Resource​s.Designer.cs">
+		<Compile Update="Properties\Resources.Designer.cs">
 			<DesignTime>True</DesignTime>
 			<AutoGen>True</AutoGen>
 			<DependentUpon>Resources.resx</DependentUpon>
@@ -77,15 +69,40 @@
 		</EmbeddedResource>
 	</ItemGroup>
 
-	<!-- Always ship ETABSv1.dll with the plugin output -->
-	<ItemGroup>
-		<None Update="ETABSv1.dll">
-			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
-		</None>
-	</ItemGroup>
+	<!-- Determine Grasshopper Libraries folder -->
+	<PropertyGroup>
+		<!-- allow override via environment variable GH_LIB -->
+		<GhLibDir Condition="'$(GH_LIB)' != ''">$(GH_LIB)</GhLibDir>
+		<GhLibDir Condition="'$(GhLibDir)' == '' and '$(APPDATA)' != ''">$(APPDATA)\Grasshopper\Libraries</GhLibDir>
+		<GhLibDir Condition="'$(GhLibDir)' == '' and '$(USERPROFILE)' != ''">$(USERPROFILE)\AppData\Roaming\Grasshopper\Libraries</GhLibDir>
+	</PropertyGroup>
 
-	<!-- Post-build: copy .gha (+interop DLLs if present) to Grasshopper\Libraries -->
-	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
-		<Exec Command=":: Resolve GH Libraries folder&#xD;&#xA;if not &quot;%25GH_LIB%25&quot;==&quot;&quot; goto gh_lib_ready&#xD;&#xA;if not &quot;%25APPDATA%25&quot;==&quot;&quot; set &quot;GH_LIB=%25APPDATA%25\Grasshopper\Libraries&quot; &amp; goto gh_lib_ready&#xD;&#xA;if not &quot;%25USERPROFILE%25&quot;==&quot;&quot; set &quot;GH_LIB=%25USERPROFILE%25\AppData\Roaming\Grasshopper\Libraries&quot; &amp; goto gh_lib_ready&#xD;&#xA;echo Failed to determine Grasshopper library folder.&amp;exit /b 1&#xD;&#xA;:gh_lib_ready&#xD;&#xA;if not exist &quot;%25GH_LIB%25&quot; mkdir &quot;%25GH_LIB%25&quot;&#xD;&#xA;&#xD;&#xA;copy /y &quot;$(TargetPath)&quot; &quot;%25GH_LIB%25\$(TargetName).gha&quot;&#xD;&#xA;if exist &quot;$(TargetDir)$(TargetName).pdb&quot; copy /y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;%25GH_LIB%25\$(TargetName).pdb&quot;&#xD;&#xA;&#xD;&#xA;for %25%25F in (ETABSv1.dll Interop.ETABSv1.dll AxInterop.ETABSv1.dll) do (&#xD;&#xA;  if exist &quot;$(TargetDir)%25%25F&quot; copy /y &quot;$(TargetDir)%25%25F&quot; &quot;%25GH_LIB%25&quot;&#xD;&#xA;)&#xD;&#xA;" />
+	<!-- Post-build: copy plugin + required dlls next to it -->
+	<Target Name="CopyToGrasshopper" AfterTargets="Build" Condition="'$(GhLibDir)' != ''">
+		<MakeDir Directories="$(GhLibDir)" />
+
+		<ItemGroup>
+			<!-- Main plugin -->
+			<GhDeploy Include="$(TargetPath)" />
+
+			<!-- Debug symbols (optional) -->
+			<GhDeploy Include="$(TargetDir)$(TargetName).pdb" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+
+			<!-- .NET deps/runtimeconfig (often needed for net8 plugins) -->
+			<GhDeploy Include="$(TargetDir)$(TargetName).deps.json" Condition="Exists('$(TargetDir)$(TargetName).deps.json')" />
+			<GhDeploy Include="$(TargetDir)$(TargetName).runtimeconfig.json" Condition="Exists('$(TargetDir)$(TargetName).runtimeconfig.json')" />
+
+			<!-- Office PIAs (will be copied to output because Private=true above) -->
+			<GhDeploy Include="$(TargetDir)Microsoft.Office.Interop.Excel.dll" Condition="Exists('$(TargetDir)Microsoft.Office.Interop.Excel.dll')" />
+			<GhDeploy Include="$(TargetDir)office.dll" Condition="Exists('$(TargetDir)office.dll')" />
+
+			<!-- ETABS -->
+			<GhDeploy Include="$(TargetDir)ETABSv1.dll" Condition="Exists('$(TargetDir)ETABSv1.dll')" />
+			<GhDeploy Include="$(TargetDir)Interop.ETABSv1.dll" Condition="Exists('$(TargetDir)Interop.ETABSv1.dll')" />
+			<GhDeploy Include="$(TargetDir)AxInterop.ETABSv1.dll" Condition="Exists('$(TargetDir)AxInterop.ETABSv1.dll')" />
+		</ItemGroup>
+
+		<Copy SourceFiles="@(GhDeploy)" DestinationFolder="$(GhLibDir)" SkipUnchangedFiles="true" />
 	</Target>
+
 </Project>
