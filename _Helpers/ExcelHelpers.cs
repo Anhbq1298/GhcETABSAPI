@@ -1,32 +1,38 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
-using Excel = Microsoft.Office.Interop.Excel;
+
+// Optional attach-to-running WITHOUT Marshal.GetActiveObject
 using Microsoft.VisualBasic;
 
 namespace MGT
 {
     /// <summary>
-    /// Excel COM helpers for .NET 8 (net8.0-windows).
-    /// - No Microsoft.Office.Core reference required.
-    /// - Hide Ribbon via Excel4 macro; Zoom-to-selection via reflection (ExecuteMso).
-    /// - Kiosk view (no Table): focus a range, hide chrome, keep sheet tabs, no maximize by default.
-    /// - Bring to front supported.
+    /// Excel COM helpers for .NET 8 (net8.0-windows) WITHOUT PIAs
+    /// (no Microsoft.Office.Interop.Excel, no office.dll).
+    ///
+    /// - Late-binding via ProgID "Excel.Application"
+    /// - STA-threaded COM execution
+    /// - ReleaseCom(FinalReleaseComObject)
+    /// - ExcelSheetProfile + ReadSheet (fast Value2 block read)
+    /// - WriteDictionaryToWorksheet (fast 2D Value2 write)
+    ///
+    /// Notes:
+    /// - Requires Microsoft Excel installed.
+    /// - DO NOT reference Microsoft.Office.Interop.Excel in csproj.
     /// </summary>
-    internal class ExcelHelpers
+    internal static class ExcelHelpers
     {
-        // Prevent overlapping COM calls in multi-threaded contexts
         private static readonly object _excelLock = new object();
 
-        // -------- UI STATE (INSIDE THIS CLASS) --------
-        /// <summary>Snapshot of Excel UI state so we can restore later.</summary>
-        internal class UiState
+        // =========================
+        // UI STATE
+        // =========================
+        internal sealed class UiState
         {
             public bool? DisplayFullScreen;
             public bool? DisplayFormulaBar;
@@ -34,7 +40,6 @@ namespace MGT
             public bool? ScreenUpdating;
             public bool? EnableEvents;
 
-            // Per-window toggles
             public bool? DisplayGridlines;
             public bool? DisplayHeadings;
             public bool? DisplayHorizontalScrollBar;
@@ -42,110 +47,16 @@ namespace MGT
             public bool? DisplayWorkbookTabs;
             public int? Zoom;
         }
-        // ----------------------------------------------
 
-        #region Path / COM helpers
-
-        /// <summary>
-        /// Convert a relative path to full path using AppDomain.BaseDirectory.
-        /// Returns full path if input is already absolute; null/empty stays null.
-        /// </summary>
-        internal static string ProjectRelative(string filePathOrRelative)
-        {
-            if (string.IsNullOrWhiteSpace(filePathOrRelative)) return null;
-            try
-            {
-                if (Path.IsPathRooted(filePathOrRelative))
-                    return Path.GetFullPath(filePathOrRelative);
-
-                string baseDir = AppDomain.CurrentDomain.BaseDirectory; // e.g. bin\Debug
-                return Path.GetFullPath(Path.Combine(baseDir, filePathOrRelative));
-            }
-            catch
-            {
-                return filePathOrRelative;
-            }
-        }
-
-        internal static string TrimOrEmpty(object value)
-        {
-            if (value == null)
-            {
-                return string.Empty;
-            }
-
-            string s = Convert.ToString(value, CultureInfo.InvariantCulture);
-            return string.IsNullOrWhiteSpace(s) ? string.Empty : s.Trim();
-        }
-
-        internal static bool IsNullOrEmpty(object value)
-        {
-            if (value == null)
-            {
-                return true;
-            }
-
-            if (value is string s)
-            {
-                return string.IsNullOrWhiteSpace(s);
-            }
-
-            if (value is double d)
-            {
-                return double.IsNaN(d) || double.IsInfinity(d);
-            }
-
-            return false;
-        }
-
-        internal static Excel.Worksheet FindWorksheet(Excel.Workbook workbook, string sheetName)
-        {
-            if (workbook == null)
-            {
-                return null;
-            }
-
-            Excel.Sheets sheets = null;
-
-            try
-            {
-                sheets = TryGetSheets(workbook);
-                int count = sheets?.Count ?? 0;
-
-                for (int i = 1; i <= count; i++)
-                {
-                    Excel.Worksheet candidate = null;
-                    try
-                    {
-                        candidate = sheets[i] as Excel.Worksheet;
-                        if (candidate != null && string.Equals(candidate.Name, sheetName, StringComparison.OrdinalIgnoreCase))
-                        {
-                            Excel.Worksheet result = candidate;
-                            candidate = null;
-                            return result;
-                        }
-                    }
-                    finally
-                    {
-                        ReleaseCom(candidate);
-                    }
-                }
-
-                return null;
-            }
-            finally
-            {
-                ReleaseCom(sheets);
-            }
-        }
-
-        #region Worksheet reading helper
-
+        // =========================
+        // PROFILES (ReadSheet)
+        // =========================
         internal sealed class ExcelSheetProfile
         {
             internal string ExpectedSheetName { get; init; }
             internal int StartColumn { get; init; } = 1;
             internal IReadOnlyList<string> ExpectedHeaders { get; init; }
+
             internal string ProgressLabel { get; init; } = "Reading Excel";
             internal string CompletionLabel { get; init; } = "Excel Done";
             internal string ProgressUnit { get; init; } = "row";
@@ -157,995 +68,371 @@ namespace MGT
             internal List<object[]> Rows { get; } = new List<object[]>();
         }
 
-        internal static ExcelSheetReadResult ReadSheet(
-            string fullPath,
-            string requestedSheetName,
-            ExcelSheetProfile profile,
-            Action<int, int, string> progressCallback = null)
+        // =========================
+        // PATH / VALUE HELPERS
+        // =========================
+        private static string NormalizeAbsoluteWorkbookPath(string absolutePath)
         {
-            if (string.IsNullOrWhiteSpace(fullPath))
-            {
-                throw new ArgumentException("Excel path cannot be empty.", nameof(fullPath));
-            }
+            if (string.IsNullOrWhiteSpace(absolutePath)) return null;
 
-            if (profile == null)
-            {
-                throw new ArgumentNullException(nameof(profile));
-            }
+            string p = absolutePath.Trim();
+            if (!Path.IsPathRooted(p))
+                throw new ArgumentException("Expected an absolute path (from Rhino).", nameof(absolutePath));
 
-            if (profile.ExpectedHeaders == null)
-            {
-                throw new ArgumentException("Profile must define ExpectedHeaders.", nameof(profile));
-            }
-
-            string sheetToRead = string.IsNullOrWhiteSpace(requestedSheetName)
-                ? profile.ExpectedSheetName
-                : requestedSheetName;
-
-            if (!string.IsNullOrEmpty(profile.ExpectedSheetName) &&
-                !string.Equals(sheetToRead, profile.ExpectedSheetName, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException(
-                    $"Invalid workbook: expected sheet name '{profile.ExpectedSheetName}'.");
-            }
-
-            Excel.Application app = null;
-            Excel.Workbooks books = null;
-            Excel.Workbook wb = null;
-            Excel.Worksheet ws = null;
-            Excel.Range usedRange = null;
-
-            try
-            {
-                app = new Excel.Application();
-
-                TrySetApplicationBool(app, "Visible", false);
-                TrySetApplicationBool(app, "DisplayAlerts", false);
-                TrySetApplicationBool(app, "UserControl", false);
-
-                books = TryGetWorkbooks(app);
-                wb = TryOpenWorkbook(
-                    books,
-                    Filename: fullPath,
-                    UpdateLinks: 0,
-                    ReadOnly: true,
-                    IgnoreReadOnlyRecommended: true,
-                    AddToMru: false);
-
-                ws = FindWorksheet(wb, sheetToRead);
-                if (ws == null)
-                {
-                    throw new InvalidOperationException(
-                        $"Worksheet '{sheetToRead}' not found in '{Path.GetFileName(fullPath)}'.");
-                }
-
-                ExcelSheetReadResult result = new ExcelSheetReadResult();
-
-                int startColumn = Math.Max(1, profile.StartColumn);
-                int columnCount = profile.ExpectedHeaders.Count;
-
-                for (int col = 0; col < columnCount; col++)
-                {
-                    Excel.Range headerCell = null;
-                    try
-                    {
-                        headerCell = (Excel.Range)ws.Cells[1, startColumn + col];
-                        string headerValue = TrimOrEmpty(headerCell?.Value2);
-                        result.Headers.Add(headerValue);
-
-                        string expectedHeader = profile.ExpectedHeaders[col];
-                        if (!string.Equals(headerValue, expectedHeader, StringComparison.OrdinalIgnoreCase))
-                        {
-                            char columnLetter = (char)('A' + startColumn + col - 1);
-                            throw new InvalidOperationException(
-                                $"Invalid workbook: expected header '{expectedHeader}' in column {columnLetter}, found '{headerValue}'.");
-                        }
-                    }
-                    finally
-                    {
-                        ReleaseCom(headerCell);
-                    }
-                }
-
-                usedRange = ws.UsedRange;
-                int lastRow = 1;
-                if (usedRange != null)
-                {
-                    try
-                    {
-                        lastRow = Math.Max(lastRow, usedRange.Row + usedRange.Rows.Count - 1);
-                    }
-                    catch
-                    {
-                        lastRow = 1;
-                    }
-                }
-
-                int totalRows = Math.Max(0, lastRow - 1);
-                progressCallback?.Invoke(
-                    0,
-                    totalRows,
-                    UiHelpers.FormatProgressStatus(0, totalRows, profile.ProgressLabel, profile.ProgressUnit));
-
-                int processedRows = 0;
-
-                for (int row = 2; row <= lastRow; row++)
-                {
-                    object[] rowValues = new object[columnCount];
-                    bool hasData = false;
-
-                    for (int col = 0; col < columnCount; col++)
-                    {
-                        Excel.Range cell = null;
-                        try
-                        {
-                            cell = (Excel.Range)ws.Cells[row, startColumn + col];
-                            object value = cell?.Value2;
-                            rowValues[col] = value;
-                            if (!IsNullOrEmpty(value))
-                            {
-                                hasData = true;
-                            }
-                        }
-                        finally
-                        {
-                            ReleaseCom(cell);
-                        }
-                    }
-
-                    processedRows++;
-                    int current = totalRows > 0 ? Math.Min(processedRows, totalRows) : processedRows;
-                    progressCallback?.Invoke(
-                        current,
-                        totalRows,
-                        UiHelpers.FormatProgressStatus(current, totalRows, profile.ProgressLabel, profile.ProgressUnit));
-
-                    if (!hasData)
-                    {
-                        continue;
-                    }
-
-                    result.Rows.Add(rowValues);
-                }
-
-                progressCallback?.Invoke(
-                    result.Rows.Count,
-                    result.Rows.Count,
-                    UiHelpers.FormatCompletionStatus(result.Rows.Count, profile.CompletionLabel, profile.ProgressUnit));
-
-                return result;
-            }
-            finally
-            {
-                ReleaseCom(usedRange);
-
-                if (wb != null)
-                {
-                    try { wb.Close(false); } catch { }
-                }
-
-                ReleaseCom(ws);
-                ReleaseCom(wb);
-                ReleaseCom(books);
-
-                if (app != null)
-                {
-                    try { app.Quit(); } catch { }
-                }
-
-                ReleaseCom(app);
-            }
+            return Path.GetFullPath(p);
         }
 
-        #endregion
+        internal static string TrimOrEmpty(object value)
+        {
+            if (value == null) return string.Empty;
+            string s = Convert.ToString(value, CultureInfo.InvariantCulture);
+            return string.IsNullOrWhiteSpace(s) ? string.Empty : s.Trim();
+        }
 
-        /// <summary>
-        /// Release a COM RCW immediately (safe no-op for managed objects).
-        /// </summary>
+        internal static bool IsNullOrEmpty(object value)
+        {
+            if (value == null) return true;
+            if (value is string s) return string.IsNullOrWhiteSpace(s);
+            if (value is double d) return double.IsNaN(d) || double.IsInfinity(d);
+            return false;
+        }
+
+        // =========================
+        // COM CLEANUP
+        // =========================
         internal static void ReleaseCom(object o)
         {
+            if (o == null) return;
             try
             {
-                if (o != null && Marshal.IsComObject(o))
+                if (Marshal.IsComObject(o))
                     Marshal.FinalReleaseComObject(o);
             }
-            catch { /* ignore */ }
-        }
-
-        #endregion
-
-        #region Attach / Open / Close Excel
-
-        /// <summary>
-        /// Attach to a running Excel instance first; if the requested workbook is already open, reuse it.
-        /// Otherwise open the path (or create a temp workbook when path is empty). Returns true when a new
-        /// Excel application was created.
-        /// </summary>
-        internal static bool AttachOrOpenWorkbook(
-            out Excel.Application app,
-            out Excel.Workbook wb,
-            string filePathOrRelative,
-            bool visible = true,
-            bool readOnly = false,
-            bool maximizeWindow = false,
-            bool bringToFront = true)
-        {
-            lock (_excelLock)
-            {
-                app = TryGetRunningExcelApplication();
-                bool createdApplication = app == null;
-                wb = null;
-
-                string fullPath = string.IsNullOrWhiteSpace(filePathOrRelative)
-                    ? null
-                    : Path.GetFullPath(filePathOrRelative);
-
-                try
-                {
-                    if (app == null)
-                    {
-                        app = new Excel.Application();
-                    }
-
-                    bool previousAlerts = TryGetApplicationBool(app, "DisplayAlerts") ?? false;
-                    TrySetApplicationBool(app, "DisplayAlerts", false);
-
-                    Excel.Workbooks books = null;
-                    try
-                    {
-                        books = TryGetWorkbooks(app);
-
-                        if (string.IsNullOrWhiteSpace(fullPath))
-                        {
-                            wb = TryAddWorkbook(app);
-                        }
-                        else
-                        {
-                            if (!File.Exists(fullPath)) throw new FileNotFoundException(fullPath);
-
-                            wb = TryFindWorkbookByFullPath(books, fullPath) ?? TryOpenWorkbook(
-                                books,
-                                Filename: fullPath,
-                                UpdateLinks: 0,
-                                ReadOnly: readOnly,
-                                IgnoreReadOnlyRecommended: true,
-                                AddToMru: false);
-                        }
-                    }
-                    finally
-                    {
-                        ReleaseCom(books);
-                        TrySetApplicationBool(app, "DisplayAlerts", previousAlerts);
-                    }
-
-                    if (wb == null) throw new InvalidOperationException("Excel workbook could not be opened.");
-
-                    if (visible)
-                    {
-                        TrySetApplicationBool(app, "Visible", true);
-                        TrySetApplicationBool(app, "UserControl", true);
-                    }
-
-                    try { wb.Activate(); } catch { }
-                    if (maximizeWindow) MaximizeExcelWindow(app);
-                    if (bringToFront) BringExcelToFront(app);
-
-                    return createdApplication;
-                }
-                catch
-                {
-                    if (createdApplication)
-                    {
-                        try { app?.Quit(); } catch { }
-                    }
-
-                    ReleaseCom(wb);
-                    ReleaseCom(app);
-                    wb = null;
-                    app = null;
-                    return false;
-                }
-            }
-        }
-
-        /// <summary>
-        /// Bring the Excel main window to the foreground (no maximize).
-        /// </summary>
-        private static void BringExcelToFront(Excel.Application app)
-        {
-            if (app == null) return;
-            try
-            {
-                // Make sure Excel is visible and the workbook window is active
-                TrySetApplicationBool(app, "Visible", true);
-                TrySetApplicationBool(app, "UserControl", true);
-                try
-                {
-                    var aw = TryGetActiveWindow(app);
-                    if (aw != null)
-                    {
-                        try { aw.Activate(); } catch { }
-                        ReleaseCom(aw);
-                    }
-                }
-                catch { }
-
-                // Bring main HWND to front
-                IntPtr hwnd = TryGetApplicationHwnd(app);
-                if (hwnd != IntPtr.Zero)
-                {
-                    ShowWindow(hwnd, SW_RESTORE);
-                    SetForegroundWindow(hwnd);
-                }
-            }
-            catch { /* no-op */ }
-        }
-
-        /// <summary>
-        /// Safely access Excel.Application.ActiveWindow even when interop definitions omit it.
-        /// </summary>
-        private static Excel.Window TryGetActiveWindow(Excel.Application app)
-        {
-            if (app == null) return null;
-            try
-            {
-                object aw = app.GetType().InvokeMember(
-                    "ActiveWindow",
-                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    app,
-                    null);
-                return aw as Excel.Window;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// Maximize Excel UI window(s) reliably (MDI/SDI): Excel.Application & ActiveWindow + Win32.
-        /// </summary>
-        private static void MaximizeExcelWindow(Excel.Application app)
-        {
-            if (app == null) return;
-                try
-                {
-                    TrySetApplicationProperty(app, "WindowState", Excel.XlWindowState.xlMaximized);
-                    Excel.Window aw = null;
-                    try
-                    {
-                    aw = TryGetActiveWindow(app);
-                    if (aw != null)
-                    {
-                        try { aw.WindowState = Excel.XlWindowState.xlMaximized; } catch { }
-                    }
-                }
-                catch { }
-                finally
-                {
-                    if (aw != null) ReleaseCom(aw);
-                }
-
-                IntPtr hwnd = TryGetApplicationHwnd(app);
-                if (hwnd != IntPtr.Zero)
-                {
-                    ShowWindow(hwnd, SW_RESTORE);
-                    ShowWindow(hwnd, SW_MAXIMIZE);
-                    SetForegroundWindow(hwnd);
-                }
-            }
             catch { }
         }
 
-        /// <summary>
-        /// Late-bind a boolean property on Excel.Application (returns null if unavailable).
-        /// Avoids compile-time dependency on interop members that may be missing.
-        /// </summary>
-        private static bool? TryGetApplicationBool(Excel.Application app, string propertyName)
+        // =========================
+        // STA RUNNER
+        // =========================
+        private static T RunSta<T>(Func<T> work)
         {
-            if (app == null || string.IsNullOrWhiteSpace(propertyName)) return null;
-
-            try
-            {
-                object value = app.GetType().InvokeMember(
-                    propertyName,
-                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    app,
-                    null);
-
-                if (value is bool b) return b;
-                if (value is int i) return i != 0;
-            }
-            catch { }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Late-bind a boolean property setter on Excel.Application (safe no-op on failure).
-        /// </summary>
-        private static void TrySetApplicationBool(Excel.Application app, string propertyName, bool value)
-        {
-            if (app == null || string.IsNullOrWhiteSpace(propertyName)) return;
-
-            try
-            {
-                app.GetType().InvokeMember(
-                    propertyName,
-                    BindingFlags.SetProperty | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    app,
-                    new object[] { value });
-            }
-            catch { }
-        }
-
-        /// <summary>
-        /// Late-bind any property setter on Excel.Application (safe no-op on failure).
-        /// </summary>
-        private static void TrySetApplicationProperty(Excel.Application app, string propertyName, object value)
-        {
-            if (app == null || string.IsNullOrWhiteSpace(propertyName)) return;
-
-            try
-            {
-                app.GetType().InvokeMember(
-                    propertyName,
-                    BindingFlags.SetProperty | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    app,
-                    new object[] { value });
-            }
-            catch { }
-        }
-
-        private static IntPtr TryGetApplicationHwnd(Excel.Application app)
-        {
-            if (app == null) return IntPtr.Zero;
-
-            try
-            {
-                object value = app.GetType().InvokeMember(
-                    "Hwnd",
-                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    app,
-                    null);
-
-                if (value is int i) return new IntPtr(i);
-                if (value is long l) return new IntPtr(l);
-            }
-            catch { }
-
-            return IntPtr.Zero;
-        }
-
-        private static Excel.Workbooks TryGetWorkbooks(Excel.Application app)
-        {
-            if (app == null) return null;
-            try
-            {
-                return app.GetType().InvokeMember(
-                    "Workbooks",
-                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    app,
-                    null) as Excel.Workbooks;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static int TryGetWorkbooksCount(Excel.Workbooks books)
-        {
-            if (books == null) return 0;
-            try
-            {
-                object value = books.GetType().InvokeMember(
-                    "Count",
-                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    books,
-                    null);
-
-                if (value is int i) return i;
-                if (value is double d) return (int)d;
-            }
-            catch { }
-
-            return 0;
-        }
-
-        private static Excel.Workbook TryGetWorkbook(Excel.Workbooks books, int index)
-        {
-            if (books == null) return null;
-            try
-            {
-                return books.GetType().InvokeMember(
-                    "Item",
-                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    books,
-                    new object[] { index }) as Excel.Workbook;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static string TryGetWorkbookFullName(Excel.Workbook wb)
-        {
-            if (wb == null) return null;
-            try
-            {
-                object value = wb.GetType().InvokeMember(
-                    "FullName",
-                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    wb,
-                    null);
-
-                return value as string ?? value?.ToString();
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static Excel.Workbook TryFindWorkbookByFullPath(Excel.Workbooks books, string fullPath)
-        {
-            if (books == null || string.IsNullOrWhiteSpace(fullPath)) return null;
-
-            string normalizedTarget = null;
-            try { normalizedTarget = Path.GetFullPath(fullPath); }
-            catch { normalizedTarget = fullPath; }
-
-            int count = TryGetWorkbooksCount(books);
-            Excel.Workbook match = null;
-            for (int i = 1; i <= count; i++)
-            {
-                Excel.Workbook candidate = null;
-                try
-                {
-                    candidate = TryGetWorkbook(books, i);
-                    string candidatePath = TryGetWorkbookFullName(candidate);
-                    if (string.IsNullOrWhiteSpace(candidatePath)) continue;
-
-                    string normalizedCandidate = candidatePath;
-                    try { normalizedCandidate = Path.GetFullPath(candidatePath); } catch { }
-
-                    if (string.Equals(normalizedCandidate, normalizedTarget, StringComparison.OrdinalIgnoreCase))
-                    {
-                        match = candidate;
-                        candidate = null; // prevent release
-                        break;
-                    }
-                }
-                finally
-                {
-                    if (candidate != null)
-                    {
-                        try { ReleaseCom(candidate); } catch { }
-                    }
-                }
-            }
-
-            return match;
-        }
-
-        private static Excel.Workbook TryAddWorkbook(Excel.Application app)
-        {
-            Excel.Workbooks books = null;
-            try
-            {
-                books = TryGetWorkbooks(app);
-                return books?.GetType().InvokeMember(
-                    "Add",
-                    BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    books,
-                    new object[] { Type.Missing }) as Excel.Workbook;
-            }
-            catch
-            {
-                return null;
-            }
-            finally
-            {
-                ReleaseCom(books);
-            }
-        }
-
-        private static Excel.Workbook TryOpenWorkbook(
-            Excel.Workbooks books,
-            string Filename,
-            int UpdateLinks,
-            bool ReadOnly,
-            bool IgnoreReadOnlyRecommended,
-            bool AddToMru)
-        {
-            if (books == null) return null;
-            try
-            {
-                return books.GetType().InvokeMember(
-                    "Open",
-                    BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    books,
-                    new object[] { Filename, UpdateLinks, ReadOnly, Type.Missing, Type.Missing, Type.Missing, true, "",
-                        AddToMru, false, Type.Missing, IgnoreReadOnlyRecommended, Type.Missing, Type.Missing, Type.Missing,
-                        Type.Missing, Type.Missing, Type.Missing }) as Excel.Workbook;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static void TrySaveWorkbook(Excel.Workbook wb, string path, Excel.XlFileFormat format)
-        {
-            if (wb == null || string.IsNullOrWhiteSpace(path)) return;
-            try
-            {
-                wb.GetType().InvokeMember(
-                    "SaveAs",
-                    BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    wb,
-                    new object[] { path, format });
-            }
-            catch { }
-        }
-
-        private static Excel.Sheets TryGetSheets(Excel.Workbook workbook)
-        {
-            if (workbook == null) return null;
-            try
-            {
-                return workbook.GetType().InvokeMember(
-                    "Worksheets",
-                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    workbook,
-                    null) as Excel.Sheets;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static int TryGetSheetsCount(Excel.Sheets sheets)
-        {
-            if (sheets == null) return 0;
-            try
-            {
-                object value = sheets.GetType().InvokeMember(
-                    "Count",
-                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    sheets,
-                    null);
-
-                if (value is int i) return i;
-                if (value is double d) return (int)d;
-            }
-            catch { }
-
-            return 0;
-        }
-
-        private static Excel.Worksheet TryGetWorksheet(Excel.Sheets sheets, int index)
-        {
-            if (sheets == null) return null;
-            try
-            {
-                return sheets.GetType().InvokeMember(
-                    "Item",
-                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    sheets,
-                    new object[] { index }) as Excel.Worksheet;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static Excel.Worksheet TryAddWorksheet(Excel.Sheets sheets)
-        {
-            if (sheets == null) return null;
-            try
-            {
-                int count = TryGetSheetsCount(sheets);
-                object after = sheets.GetType().InvokeMember(
-                    "Item",
-                    BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    sheets,
-                    new object[] { count });
-
-                return sheets.GetType().InvokeMember(
-                    "Add",
-                    BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    sheets,
-                    new object[] { Type.Missing, after, Type.Missing, Type.Missing }) as Excel.Worksheet;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// Close all workbooks (no prompts), quit the app, release RCWs, then double-GC.
-        /// </summary>
-        private static void SafeQuitExcel(Excel.Application excel)
-        {
-            if (excel == null) return;
-
-            bool prevAlerts = TryGetApplicationBool(excel, "DisplayAlerts") ?? false;
-            TrySetApplicationBool(excel, "DisplayAlerts", false);
-            TrySetApplicationBool(excel, "ScreenUpdating", false);
-            TrySetApplicationBool(excel, "UserControl", false);
-
-            Excel.Workbooks books = null;
-            try
-            {
-                books = TryGetWorkbooks(excel);
-                for (int i = books.Count; i >= 1; i--)
-                {
-                    Excel.Workbook wb = null;
-                    try { wb = books[i]; wb.Close(SaveChanges: false); }
-                    catch { }
-                    finally { ReleaseCom(wb); }
-                }
-            }
-            catch { }
-            finally { ReleaseCom(books); }
-
-            try { excel.Quit(); } catch { }
-            ReleaseCom(excel);
-
-            try
-            {
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-            }
-            catch { }
-        }
-
-        /// <summary>
-        /// Try to get a running Excel instance WITHOUT Marshal.GetActiveObject.
-        /// 1) VB Interaction.GetObject
-        /// 2) HWND/Accessibility (FindWindowEx + AccessibleObjectFromWindow)
-        /// </summary>
-        private static Excel.Application TryGetRunningExcelApplication()
-        {
-            Excel.Application result = null;
-            Exception captured = null;
-
-            void Probe()
-            {
-                // --- Route 1: VB Interaction ---
-                try
-                {
-                    object obj = Interaction.GetObject(null, "Excel.Application");
-                    result = obj as Excel.Application;
-                    if (result != null) return;
-
-                    if (obj != null)
-                    {
-                        var appObj = obj.GetType().InvokeMember("Application", BindingFlags.GetProperty, null, obj, null);
-                        result = appObj as Excel.Application;
-                        if (result != null) return;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    captured = ex;
-                    result = null;
-                }
-
-                // --- Route 2: HWND / Accessibility ---
-                try
-                {
-                    IntPtr prev = IntPtr.Zero;
-                    while (true)
-                    {
-                        IntPtr xlMain = FindWindowEx(IntPtr.Zero, prev, "XLMAIN", null);
-                        if (xlMain == IntPtr.Zero) break;
-                        prev = xlMain;
-
-                        if (TryGetAppFromHwnd(xlMain, out result) && result != null) return;
-
-                        IntPtr xlDesk = FindWindowEx(xlMain, IntPtr.Zero, "XLDESK", null);
-                        if (xlDesk != IntPtr.Zero)
-                        {
-                            IntPtr excel7 = FindWindowEx(xlDesk, IntPtr.Zero, "EXCEL7", null);
-                            if (excel7 != IntPtr.Zero)
-                            {
-                                if (TryGetAppFromHwnd(excel7, out result) && result != null) return;
-
-                                if (TryGetComFromHwnd(excel7, out object sheetObj) && sheetObj != null)
-                                {
-                                    try
-                                    {
-                                        var appObj = sheetObj.GetType().InvokeMember("Application", BindingFlags.GetProperty, null, sheetObj, null);
-                                        result = appObj as Excel.Application;
-                                        if (result != null) return;
-                                    }
-                                    catch { }
-                                    finally
-                                    {
-                                        try { if (Marshal.IsComObject(sheetObj)) Marshal.FinalReleaseComObject(sheetObj); } catch { }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    captured = ex;
-                    result = null;
-                }
-            }
-
             if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
-            {
-                Probe();
-            }
-            else
-            {
-                var t = new Thread(Probe) { IsBackground = true };
-                t.SetApartmentState(ApartmentState.STA);
-                t.Start();
-                t.Join();
-            }
+                return work();
 
-            if (result == null && captured != null)
-                Debug.WriteLine("Excel not reachable via Interaction/AccessibleObject: " + captured.Message);
+            T result = default;
+            Exception error = null;
 
+            var t = new Thread(() =>
+            {
+                try { result = work(); }
+                catch (Exception ex) { error = ex; }
+            });
+
+            t.IsBackground = true;
+            t.SetApartmentState(ApartmentState.STA);
+            t.Start();
+            t.Join();
+
+            if (error != null) throw error;
             return result;
         }
 
-        // ---- Win32 + Accessibility interop helpers ----
-        private const uint OBJID_NATIVEOM = 0xFFFFFFF0;
-        private static readonly Guid IID_IDispatch = new Guid("00020400-0000-0000-C000-000000000046");
-
-        private const int SW_RESTORE = 9;
-        private const int SW_MAXIMIZE = 3;
-
-        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
-        private static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
-
-        [DllImport("user232.dll", SetLastError = true)]
-        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern bool SetForegroundWindow(IntPtr hWnd);
-
-        [DllImport("oleacc.dll")]
-        private static extern int AccessibleObjectFromWindow(
-            IntPtr hwnd, uint dwObjectID, ref Guid riid,
-            [MarshalAs(UnmanagedType.IDispatch)] out object ppvObject);
-
-        private static bool TryGetComFromHwnd(IntPtr hwnd, out object com)
-        {
-            com = null;
-            try
-            {
-                Guid iid = IID_IDispatch; // local copy for ref param
-                int hr = AccessibleObjectFromWindow(hwnd, OBJID_NATIVEOM, ref iid, out object obj);
-                if (hr >= 0 && obj != null)
-                {
-                    com = obj;
-                    return true;
-                }
-            }
-            catch { }
-            return false;
-        }
-
-        private static bool TryGetAppFromHwnd(IntPtr hwnd, out Excel.Application app)
-        {
-            app = null;
-            if (TryGetComFromHwnd(hwnd, out object obj) && obj != null)
-            {
-                app = obj as Excel.Application;
-                if (app != null) return true;
-
-                try
-                {
-                    var appObj = obj.GetType().InvokeMember("Application", BindingFlags.GetProperty, null, obj, null);
-                    app = appObj as Excel.Application;
-                    if (app != null) return true;
-                }
-                catch { }
-                finally
-                {
-                    try { if (Marshal.IsComObject(obj)) Marshal.FinalReleaseComObject(obj); } catch { }
-                }
-            }
-            return false;
-        }
-
-        #endregion
-
-        #region Worksheet helpers
+        // =========================
+        // EXCEL CREATE / ATTACH (NO Marshal.GetActiveObject)
+        // =========================
 
         /// <summary>
-        /// Get a worksheet by name; create if missing. Returns a WS RCW owned by the caller.
+        /// Attach to running Excel WITHOUT Marshal.GetActiveObject.
+        /// Uses VB Interaction.GetObject (ROT under the hood).
+        /// Returns false if no running instance.
         /// </summary>
-        internal static Excel.Worksheet GetOrCreateWorksheet(Excel.Workbook wb, string sheetName)
+        private static bool TryGetRunningExcel(out dynamic app)
         {
-            if (wb == null) throw new ArgumentNullException(nameof(wb));
-            if (string.IsNullOrWhiteSpace(sheetName)) sheetName = "Sheet1";
-
-            Excel.Worksheet ws = null;
-            Excel.Sheets sheets = null;
+            app = null;
             try
             {
-                sheets = TryGetSheets(wb);
-                int sheetCount = TryGetSheetsCount(sheets);
+                object obj = Interaction.GetObject(string.Empty, "Excel.Application");
+                if (obj == null) return false;
+                app = obj;
+                return true;
+            }
+            catch
+            {
+                app = null;
+                return false;
+            }
+        }
 
-                for (int i = 1; i <= sheetCount; i++)
+        private static dynamic CreateExcelApplication(bool visible)
+        {
+            Type t = Type.GetTypeFromProgID("Excel.Application", throwOnError: true);
+            dynamic app = Activator.CreateInstance(t);
+
+            try { app.DisplayAlerts = false; } catch { }
+            try { app.Visible = visible; } catch { }
+            try { app.UserControl = visible; } catch { }
+
+            return app;
+        }
+
+        /// <summary>
+        /// Either attach to running Excel (optional), or create a new instance.
+        /// Returns true if a NEW instance was created.
+        /// </summary>
+        private static bool GetOrCreateExcelApplication(bool visible, bool tryAttachToRunning, out dynamic app)
+        {
+            app = null;
+
+            if (tryAttachToRunning)
+            {
+                if (TryGetRunningExcel(out app) && app != null)
                 {
-                    Excel.Worksheet s = null;
+                    try { app.DisplayAlerts = false; } catch { }
+                    if (visible)
+                    {
+                        try { app.Visible = true; } catch { }
+                        try { app.UserControl = true; } catch { }
+                    }
+                    return false; // attached (not created)
+                }
+            }
+
+            app = CreateExcelApplication(visible);
+            return true; // created new
+        }
+
+        // =========================
+        // WORKBOOK OPEN / REUSE
+        // =========================
+        private static dynamic TryFindOpenWorkbook(dynamic app, string fullPath)
+        {
+            if (app == null) return null;
+            if (string.IsNullOrWhiteSpace(fullPath)) return null;
+
+            dynamic books = null;
+            try
+            {
+                books = app.Workbooks;
+                int count = 0;
+                try { count = (int)books.Count; } catch { count = 0; }
+
+                string target = Path.GetFullPath(fullPath);
+
+                for (int i = 1; i <= count; i++)
+                {
+                    dynamic wb = null;
+                    bool isMatch = false;
+
                     try
                     {
-                        s = TryGetWorksheet(sheets, i);
-                        if (string.Equals(s?.Name, sheetName, StringComparison.OrdinalIgnoreCase))
+                        wb = books[i];
+
+                        string opened = null;
+                        try { opened = (string)wb.FullName; } catch { opened = null; }
+                        if (string.IsNullOrWhiteSpace(opened))
                         {
-                            ws = s; // transfer ownership
-                            s = null;
-                            break;
+                            try { opened = (string)wb.Name; } catch { opened = null; }
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(opened))
+                        {
+                            if (Path.IsPathRooted(opened))
+                            {
+                                if (string.Equals(Path.GetFullPath(opened), target, StringComparison.OrdinalIgnoreCase))
+                                    isMatch = true;
+                            }
+                            else
+                            {
+                                if (string.Equals(opened, Path.GetFileName(target), StringComparison.OrdinalIgnoreCase))
+                                    isMatch = true;
+                            }
+                        }
+
+                        if (isMatch) return wb; // caller owns
+                    }
+                    finally
+                    {
+                        if (!isMatch) ReleaseCom(wb);
+                    }
+                }
+
+                return null;
+            }
+            finally
+            {
+                ReleaseCom(books);
+            }
+        }
+
+        /// <summary>
+        /// Open workbook in this Excel instance.
+        /// If already open -> reuse.
+        /// </summary>
+        private static dynamic OpenOrReuseWorkbook(dynamic app, string fullPath, bool readOnly)
+        {
+            if (app == null) throw new ArgumentNullException(nameof(app));
+
+            if (!string.IsNullOrWhiteSpace(fullPath))
+            {
+                if (!File.Exists(fullPath))
+                    throw new FileNotFoundException(fullPath);
+
+                dynamic reuse = TryFindOpenWorkbook(app, fullPath);
+                if (reuse != null) return reuse;
+            }
+
+            dynamic books = null;
+            try
+            {
+                books = app.Workbooks;
+
+                if (string.IsNullOrWhiteSpace(fullPath))
+                    return books.Add();
+
+                return books.Open(
+                    fullPath,
+                    0,
+                    readOnly,
+                    Type.Missing,
+                    Type.Missing,
+                    Type.Missing,
+                    true,
+                    Type.Missing,
+                    Type.Missing,
+                    false,
+                    false,
+                    Type.Missing,
+                    false,
+                    Type.Missing,
+                    Type.Missing);
+            }
+            finally
+            {
+                ReleaseCom(books);
+            }
+        }
+
+        // =========================
+        // WORKSHEET FIND / CREATE
+        // =========================
+
+        /// <summary>
+        /// IMPORTANT: internal (fix CS0122)
+        /// Returns COM worksheet (caller owns).
+        /// </summary>
+        internal static dynamic FindWorksheet(dynamic wb, string sheetName)
+        {
+            if (wb == null) return null;
+            if (string.IsNullOrWhiteSpace(sheetName)) return null;
+
+            dynamic sheets = null;
+            try
+            {
+                sheets = wb.Worksheets;
+                int count = 0;
+                try { count = (int)sheets.Count; } catch { count = 0; }
+
+                for (int i = 1; i <= count; i++)
+                {
+                    dynamic ws = null;
+                    bool isMatch = false;
+
+                    try
+                    {
+                        ws = sheets[i];
+                        string name = null;
+                        try { name = (string)ws.Name; } catch { name = null; }
+
+                        if (!string.IsNullOrWhiteSpace(name) &&
+                            string.Equals(name, sheetName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            isMatch = true;
+                            return ws;
                         }
                     }
                     finally
                     {
-                        if (s != null) ReleaseCom(s);
+                        if (!isMatch) ReleaseCom(ws);
                     }
                 }
+
+                return null;
             }
-            catch { }
             finally
             {
                 ReleaseCom(sheets);
             }
-
-            if (ws == null)
-            {
-                Excel.Sheets newSheets = null;
-                try
-                {
-                    newSheets = TryGetSheets(wb);
-                    ws = TryAddWorksheet(newSheets);
-                    try { ws.Name = sheetName; } catch { }
-                }
-                finally
-                {
-                    ReleaseCom(newSheets);
-                }
-            }
-
-            return ws;
         }
 
-        /// <summary>
-        /// Parse "A1" (or "$A$1") to (row, col). Returns false if invalid.
-        /// </summary>
+        private static dynamic GetOrCreateWorksheet(dynamic wb, string sheetName)
+        {
+            if (wb == null) throw new ArgumentNullException(nameof(wb));
+            if (string.IsNullOrWhiteSpace(sheetName)) sheetName = "Sheet1";
+
+            // try find first
+            dynamic found = FindWorksheet(wb, sheetName);
+            if (found != null) return found;
+
+            // create new
+            dynamic sheets = null;
+            dynamic afterSheet = null;
+            dynamic created = null;
+
+            try
+            {
+                sheets = wb.Worksheets;
+
+                int count = 0;
+                try { count = (int)sheets.Count; } catch { count = 0; }
+
+                if (count >= 1)
+                {
+                    afterSheet = sheets[count];
+                    created = sheets.Add(After: afterSheet);
+                }
+                else
+                {
+                    created = sheets.Add();
+                }
+
+                try { created.Name = sheetName; } catch { }
+                return created;
+            }
+            finally
+            {
+                ReleaseCom(afterSheet);
+                ReleaseCom(sheets);
+            }
+        }
+
+        // =========================
+        // SAFE QUIT (ONLY IF YOU OWN THE INSTANCE)
+        // =========================
+        internal static void SafeQuitExcel(dynamic app, dynamic wb)
+        {
+            try { if (app != null) app.DisplayAlerts = false; } catch { }
+            try { if (app != null) app.ScreenUpdating = false; } catch { }
+            try { if (app != null) app.UserControl = false; } catch { }
+
+            try { if (wb != null) wb.Close(false); } catch { }
+            try { if (app != null) app.Quit(); } catch { }
+
+            ReleaseCom(wb);
+            ReleaseCom(app);
+
+            try
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+            catch { }
+        }
+
+        // =========================
+        // ADDRESS HELPERS
+        // =========================
         private static bool TryParseA1Address(string a1, out int row, out int col)
         {
             row = 0; col = 0;
@@ -1167,7 +454,9 @@ namespace MGT
             int start = i;
             while (i < s.Length && char.IsDigit(s[i])) i++;
             if (start == i) return false;
-            if (!int.TryParse(s.Substring(start, i - start), NumberStyles.None, CultureInfo.InvariantCulture, out row)) return false;
+
+            if (!int.TryParse(s.Substring(start, i - start), NumberStyles.None, CultureInfo.InvariantCulture, out row))
+                return false;
 
             return row > 0 && col > 0;
         }
@@ -1176,373 +465,623 @@ namespace MGT
         {
             if (column < 1) column = 1;
 
-            StringBuilder builder = new StringBuilder();
+            var sb = new StringBuilder();
             int dividend = column;
+
             while (dividend > 0)
             {
                 int modulo = (dividend - 1) % 26;
-                builder.Insert(0, (char)('A' + modulo));
+                sb.Insert(0, (char)('A' + modulo));
                 dividend = (dividend - modulo) / 26;
             }
-            return builder.Length > 0 ? builder.ToString() : "A";
+
+            return sb.Length > 0 ? sb.ToString() : "A";
         }
 
-        #endregion
-
-        #region Ribbon / CommandBars (reflection)
-
-        /// <summary>
-        /// Late-bind Excel.Application.CommandBars.ExecuteMso(controlId) to avoid referencing office.dll.
-        /// Works on .NET 8 without Microsoft.Office.Core.
-        /// </summary>
-        private static void TryExecuteMso(object application, string controlId)
+        // =========================
+        // UI STRING HELPERS
+        // =========================
+        private static string FormatProgress(int current, int total, string label, string unit)
         {
-            try
-            {
-                if (application == null || string.IsNullOrWhiteSpace(controlId)) return;
-
-                // object cmdBars = application.CommandBars;
-                var cmdBars = application.GetType().InvokeMember(
-                    "CommandBars",
-                    BindingFlags.GetProperty,
-                    binder: null,
-                    target: application,
-                    args: null);
-
-                if (cmdBars == null) return;
-
-                // cmdBars.ExecuteMso(controlId);
-                cmdBars.GetType().InvokeMember(
-                    "ExecuteMso",
-                    BindingFlags.InvokeMethod,
-                    binder: null,
-                    target: cmdBars,
-                    args: new object[] { controlId });
-            }
-            catch
-            {
-                // Swallow: ExecuteMso may not exist in some Office builds or policies.
-            }
+            if (total <= 0) return $"{label}: {current} {unit}";
+            return $"{label}: {current}/{total} {unit}";
         }
 
-        #endregion
+        private static string FormatDone(int count, string label, string unit)
+        {
+            return $"{label}: {count} {unit}";
+        }
 
-        #region Kiosk view (NO Table) + UI restore
-
-        /// <summary>
-        /// In-place "kiosk" view WITHOUT converting to ListObject:
-        /// - Selects the given dataRange
-        /// - Zoom-to-selection (via ExecuteMso reflection), fallback Zoom
-        /// - Hides Ribbon, FormulaBar, StatusBar, gridlines, headings, scrollbars
-        /// - Keeps sheet tabs visible
-        /// - Does NOT maximize; FullScreen only if requested (default false)
-        /// Returns captured UiState for optional restore.
-        /// </summary>
+        // =========================
+        // KIOSK VIEW (NO TABLE)
+        // =========================
         internal static UiState ApplyKioskViewNoTable(
-            Excel.Application app,
-            Excel.Worksheet ws,
-            Excel.Range dataRange,
-            bool makeFullScreen = false) // default false
+            dynamic app,
+            dynamic ws,
+            dynamic dataRange,
+            bool makeFullScreen = false,
+            int fallbackZoom = 120)
         {
             if (app == null || ws == null || dataRange == null) return null;
 
-            // Select focus range
             try { dataRange.Select(); } catch { }
 
-            // Capture current UI state
-            UiState state = new UiState();
+            var state = new UiState();
+
+            dynamic win = null;
             try
             {
-                state.DisplayFullScreen = TryGetApplicationBool(app, "DisplayFullScreen");
-                state.DisplayFormulaBar = TryGetApplicationBool(app, "DisplayFormulaBar");
-                state.DisplayStatusBar = TryGetApplicationBool(app, "DisplayStatusBar");
-                state.ScreenUpdating = TryGetApplicationBool(app, "ScreenUpdating");
-                state.EnableEvents = TryGetApplicationBool(app, "EnableEvents");
+                try { state.DisplayFullScreen = (bool)app.DisplayFullScreen; } catch { }
+                try { state.DisplayFormulaBar = (bool)app.DisplayFormulaBar; } catch { }
+                try { state.DisplayStatusBar = (bool)app.DisplayStatusBar; } catch { }
+                try { state.ScreenUpdating = (bool)app.ScreenUpdating; } catch { }
+                try { state.EnableEvents = (bool)app.EnableEvents; } catch { }
 
-                var win = TryGetActiveWindow(app);
+                try { win = app.ActiveWindow; } catch { win = null; }
                 if (win != null)
                 {
-                    state.DisplayGridlines = win.DisplayGridlines;
-                    state.DisplayHeadings = win.DisplayHeadings;
-                    state.DisplayHorizontalScrollBar = win.DisplayHorizontalScrollBar;
-                    state.DisplayVerticalScrollBar = win.DisplayVerticalScrollBar;
-                    state.DisplayWorkbookTabs = win.DisplayWorkbookTabs;
-                    state.Zoom = win.Zoom is int z ? z : (int?)null;
+                    try { state.DisplayGridlines = (bool)win.DisplayGridlines; } catch { }
+                    try { state.DisplayHeadings = (bool)win.DisplayHeadings; } catch { }
+                    try { state.DisplayHorizontalScrollBar = (bool)win.DisplayHorizontalScrollBar; } catch { }
+                    try { state.DisplayVerticalScrollBar = (bool)win.DisplayVerticalScrollBar; } catch { }
+                    try { state.DisplayWorkbookTabs = (bool)win.DisplayWorkbookTabs; } catch { }
+                    try { state.Zoom = (int)win.Zoom; } catch { }
                 }
-            }
-            catch { }
-
-            // Hide chrome + zoom to selection
-            try
-            {
-                TrySetApplicationBool(app, "ScreenUpdating", true);
-                TrySetApplicationBool(app, "EnableEvents", false);
-
-                // Hide Ribbon (Excel4 macro)
-                try { app.ExecuteExcel4Macro(@"SHOW.TOOLBAR(""Ribbon"",False)"); } catch { }
-
-                TrySetApplicationBool(app, "DisplayFormulaBar", false);
-                TrySetApplicationBool(app, "DisplayStatusBar", false);
-
-                var win = TryGetActiveWindow(app);
-                if (win != null)
-                {
-                    // Hide most chrome but KEEP sheet tabs
-                    win.DisplayGridlines = false;
-                    win.DisplayHeadings = false;
-                    win.DisplayHorizontalScrollBar = false;
-                    win.DisplayVerticalScrollBar = false;
-                    win.DisplayWorkbookTabs = true; // keep visible
-
-                    // Zoom-to-selection without office.dll
-                    TryExecuteMso(app, "ZoomToSelection");
-
-                    // Fallback zoom if ExecuteMso not available
-                    try { if (!(win.Zoom is int)) win.Zoom = 120; } catch { }
-                }
-
-                // Do NOT force FullScreen unless requested
-                TrySetApplicationBool(app, "DisplayFullScreen", makeFullScreen);
             }
             catch { }
             finally
             {
-                TrySetApplicationBool(app, "EnableEvents", true);
+                ReleaseCom(win);
             }
 
-            // Scroll to top-left of range
             try
             {
-                var win = TryGetActiveWindow(app);
-                if (win != null)
+                try { app.ScreenUpdating = true; } catch { }
+                try { app.EnableEvents = false; } catch { }
+
+                try { app.ExecuteExcel4Macro(@"SHOW.TOOLBAR(""Ribbon"",False)"); } catch { }
+
+                try { app.DisplayFormulaBar = false; } catch { }
+                try { app.DisplayStatusBar = false; } catch { }
+
+                dynamic w2 = null;
+                try
                 {
-                    win.ScrollRow = dataRange.Row;
-                    win.ScrollColumn = dataRange.Column;
+                    try { w2 = app.ActiveWindow; } catch { w2 = null; }
+                    if (w2 != null)
+                    {
+                        try { w2.DisplayGridlines = false; } catch { }
+                        try { w2.DisplayHeadings = false; } catch { }
+                        try { w2.DisplayHorizontalScrollBar = false; } catch { }
+                        try { w2.DisplayVerticalScrollBar = false; } catch { }
+                        try { w2.DisplayWorkbookTabs = true; } catch { }
+                        try { w2.Zoom = fallbackZoom; } catch { }
+                    }
                 }
+                finally
+                {
+                    ReleaseCom(w2);
+                }
+
+                try { app.DisplayFullScreen = makeFullScreen; } catch { }
             }
             catch { }
+            finally
+            {
+                try { app.EnableEvents = true; } catch { }
+            }
 
             return state;
         }
 
-        /// <summary>
-        /// Restore Excel UI back from kiosk mode and show Ribbon again.
-        /// </summary>
-        internal static void RestoreUi(Excel.Application app, UiState state)
+        // =========================
+        // WINDOW HELPERS
+        // =========================
+        private const int SW_RESTORE = 9;
+        private const int SW_MAXIMIZE = 3;
+
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        private static void BringExcelToFront(dynamic app)
         {
-            if (app == null || state == null) return;
-
-            TrySetApplicationBool(app, "ScreenUpdating", state.ScreenUpdating ?? true);
-            TrySetApplicationBool(app, "EnableEvents", state.EnableEvents ?? true);
-            TrySetApplicationBool(app, "DisplayFullScreen", state.DisplayFullScreen ?? false);
-            TrySetApplicationBool(app, "DisplayFormulaBar", state.DisplayFormulaBar ?? true);
-            TrySetApplicationBool(app, "DisplayStatusBar", state.DisplayStatusBar ?? true);
-
-            // Show Ribbon back
-            try { app.ExecuteExcel4Macro(@"SHOW.TOOLBAR(""Ribbon"",True)"); } catch { }
+            if (app == null) return;
 
             try
             {
-                var win = TryGetActiveWindow(app);
-                if (win != null)
+                IntPtr hwnd = IntPtr.Zero;
+                try { hwnd = new IntPtr((int)app.Hwnd); } catch { hwnd = IntPtr.Zero; }
+
+                if (hwnd != IntPtr.Zero)
                 {
-                    if (state.DisplayGridlines != null) win.DisplayGridlines = state.DisplayGridlines.Value;
-                    if (state.DisplayHeadings != null) win.DisplayHeadings = state.DisplayHeadings.Value;
-                    if (state.DisplayHorizontalScrollBar != null) win.DisplayHorizontalScrollBar = state.DisplayHorizontalScrollBar.Value;
-                    if (state.DisplayVerticalScrollBar != null) win.DisplayVerticalScrollBar = state.DisplayVerticalScrollBar.Value;
-                    if (state.DisplayWorkbookTabs != null) win.DisplayWorkbookTabs = state.DisplayWorkbookTabs.Value;
-                    if (state.Zoom != null) win.Zoom = state.Zoom.Value;
+                    ShowWindow(hwnd, SW_RESTORE);
+                    SetForegroundWindow(hwnd);
                 }
             }
             catch { }
         }
 
-        #endregion
+        private static void MaximizeExcelWindow(dynamic app)
+        {
+            if (app == null) return;
 
-        #region Write API (Dictionary -> Worksheet)
+            try
+            {
+                try { app.WindowState = -4137; } catch { } // xlMaximized
 
+                IntPtr hwnd = IntPtr.Zero;
+                try { hwnd = new IntPtr((int)app.Hwnd); } catch { hwnd = IntPtr.Zero; }
+
+                if (hwnd != IntPtr.Zero)
+                {
+                    ShowWindow(hwnd, SW_RESTORE);
+                    ShowWindow(hwnd, SW_MAXIMIZE);
+                    SetForegroundWindow(hwnd);
+                }
+            }
+            catch { }
+        }
+
+        // =========================
+        // PUBLIC: AttachOrOpenWorkbook  (FIX CS1628)
+        // =========================
         /// <summary>
-        /// Write data into a worksheet starting at (startRow,startColumn) or 'startAddress' (A1).
-        /// Bold header row. Optionally clear only the target block. Optionally switch to a kiosk
-        /// "range-only" view (hidden Ribbon/UI but keep sheet tabs). No Table/ListObject involved.
+        /// Returns true if a NEW Excel instance was created.
+        /// If tryAttachToRunningExcel=true, may attach via Interaction.GetObject (NO Marshal).
         /// </summary>
+        internal static bool AttachOrOpenWorkbook(
+            out dynamic app,
+            out dynamic wb,
+            string absolutePathFromRhino,
+            bool visible = true,
+            bool readOnly = false,
+            bool maximizeWindow = false,
+            bool bringToFront = true,
+            bool tryAttachToRunningExcel = false)
+        {
+            // MUST NOT assign out params inside lambda -> use locals (fix CS1628)
+            dynamic appLocal = null;
+            dynamic wbLocal = null;
+
+            bool createdNewLocal = RunSta(() =>
+            {
+                lock (_excelLock)
+                {
+                    string fullPath = null;
+                    if (!string.IsNullOrWhiteSpace(absolutePathFromRhino))
+                        fullPath = NormalizeAbsoluteWorkbookPath(absolutePathFromRhino);
+
+                    dynamic a = null;
+                    dynamic w = null;
+                    bool createdNew = false;
+
+                    try
+                    {
+                        createdNew = GetOrCreateExcelApplication(visible, tryAttachToRunningExcel, out a);
+                        w = OpenOrReuseWorkbook(a, fullPath, readOnly);
+
+                        if (visible)
+                        {
+                            try { a.Visible = true; } catch { }
+                            try { a.UserControl = true; } catch { }
+
+                            if (maximizeWindow) MaximizeExcelWindow(a);
+                            if (bringToFront) BringExcelToFront(a);
+                            try { w.Activate(); } catch { }
+                        }
+
+                        appLocal = a;
+                        wbLocal = w;
+                        return createdNew;
+                    }
+                    catch
+                    {
+                        // If we created it -> quit. If attached -> DO NOT quit Excel.
+                        if (createdNew)
+                        {
+                            SafeQuitExcel(a, w);
+                        }
+                        else
+                        {
+                            ReleaseCom(w);
+                            ReleaseCom(a);
+                        }
+
+                        appLocal = null;
+                        wbLocal = null;
+                        return false;
+                    }
+                }
+            });
+
+            app = appLocal;
+            wb = wbLocal;
+            return createdNewLocal;
+        }
+
+        // =========================
+        // PUBLIC: ReadSheet
+        // =========================
+        internal static ExcelSheetReadResult ReadSheet(
+            string absolutePathFromRhino,
+            string requestedSheetName,
+            ExcelSheetProfile profile,
+            Action<int, int, string> progressCallback = null)
+        {
+            if (string.IsNullOrWhiteSpace(absolutePathFromRhino))
+                throw new ArgumentException("Excel path cannot be empty.", nameof(absolutePathFromRhino));
+
+            if (profile == null) throw new ArgumentNullException(nameof(profile));
+            if (profile.ExpectedHeaders == null)
+                throw new ArgumentException("Profile must define ExpectedHeaders.", nameof(profile));
+
+            return RunSta(() =>
+            {
+                lock (_excelLock)
+                {
+                    string fullPath = NormalizeAbsoluteWorkbookPath(absolutePathFromRhino);
+
+                    string sheetToRead = string.IsNullOrWhiteSpace(requestedSheetName)
+                        ? profile.ExpectedSheetName
+                        : requestedSheetName;
+
+                    if (!string.IsNullOrEmpty(profile.ExpectedSheetName) &&
+                        !string.Equals(sheetToRead, profile.ExpectedSheetName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidOperationException(
+                            $"Invalid workbook: expected sheet name '{profile.ExpectedSheetName}'.");
+                    }
+
+                    dynamic app = null;
+                    dynamic wb = null;
+                    dynamic ws = null;
+                    dynamic usedRange = null;
+
+                    try
+                    {
+                        app = CreateExcelApplication(visible: false);
+                        wb = OpenOrReuseWorkbook(app, fullPath, readOnly: true);
+
+                        // strict exists:
+                        ws = FindWorksheet(wb, sheetToRead);
+                        if (ws == null)
+                            throw new InvalidOperationException($"Sheet '{sheetToRead}' not found.");
+
+                        var result = new ExcelSheetReadResult();
+
+                        int startCol = Math.Max(1, profile.StartColumn);
+                        int colCount = profile.ExpectedHeaders.Count;
+
+                        // headers row
+                        dynamic hTL = null, hBR = null, hRng = null;
+                        try
+                        {
+                            hTL = ws.Cells[1, startCol];
+                            hBR = ws.Cells[1, startCol + colCount - 1];
+                            hRng = ws.Range(hTL, hBR);
+
+                            object hv = null;
+                            try { hv = hRng.Value2; } catch { hv = null; }
+
+                            if (hv is object[,] hv2)
+                            {
+                                for (int c = 1; c <= colCount; c++)
+                                {
+                                    string headerValue = TrimOrEmpty(hv2[1, c]);
+                                    result.Headers.Add(headerValue);
+
+                                    string expected = profile.ExpectedHeaders[c - 1];
+                                    if (!string.Equals(headerValue, expected, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        string colLetter = ColumnNumberToLetters(startCol + (c - 1));
+                                        throw new InvalidOperationException(
+                                            $"Invalid workbook: expected header '{expected}' in column {colLetter}, found '{headerValue}'.");
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                string headerValue = TrimOrEmpty(hv);
+                                result.Headers.Add(headerValue);
+
+                                string expected = profile.ExpectedHeaders[0];
+                                if (!string.Equals(headerValue, expected, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    string colLetter = ColumnNumberToLetters(startCol);
+                                    throw new InvalidOperationException(
+                                        $"Invalid workbook: expected header '{expected}' in column {colLetter}, found '{headerValue}'.");
+                                }
+                            }
+                        }
+                        finally
+                        {
+                            ReleaseCom(hRng);
+                            ReleaseCom(hTL);
+                            ReleaseCom(hBR);
+                        }
+
+                        // last row (UsedRange)
+                        int lastRow = 1;
+                        try
+                        {
+                            usedRange = ws.UsedRange;
+                            if (usedRange != null)
+                            {
+                                int firstRow = 1;
+                                int rowsCount = 1;
+                                try { firstRow = (int)usedRange.Row; } catch { firstRow = 1; }
+                                try { rowsCount = (int)usedRange.Rows.Count; } catch { rowsCount = 1; }
+                                lastRow = Math.Max(1, firstRow + rowsCount - 1);
+                            }
+                        }
+                        catch { lastRow = 1; }
+
+                        int totalDataRows = Math.Max(0, lastRow - 1);
+                        progressCallback?.Invoke(0, totalDataRows, FormatProgress(0, totalDataRows, profile.ProgressLabel, profile.ProgressUnit));
+
+                        if (lastRow <= 1)
+                        {
+                            progressCallback?.Invoke(0, 0, FormatDone(0, profile.CompletionLabel, profile.ProgressUnit));
+                            return result;
+                        }
+
+                        // data block rows 2..lastRow
+                        dynamic dTL = null, dBR = null, dRng = null;
+                        try
+                        {
+                            dTL = ws.Cells[2, startCol];
+                            dBR = ws.Cells[lastRow, startCol + colCount - 1];
+                            dRng = ws.Range(dTL, dBR);
+
+                            object dv = null;
+                            try { dv = dRng.Value2; } catch { dv = null; }
+
+                            if (dv is object[,] dv2)
+                            {
+                                int rows = dv2.GetLength(0);
+                                for (int r = 1; r <= rows; r++)
+                                {
+                                    var rowArr = new object[colCount];
+                                    bool hasData = false;
+
+                                    for (int c = 1; c <= colCount; c++)
+                                    {
+                                        object v = dv2[r, c];
+                                        rowArr[c - 1] = v;
+                                        if (!IsNullOrEmpty(v)) hasData = true;
+                                    }
+
+                                    progressCallback?.Invoke(
+                                        r,
+                                        totalDataRows,
+                                        FormatProgress(r, totalDataRows, profile.ProgressLabel, profile.ProgressUnit));
+
+                                    if (hasData) result.Rows.Add(rowArr);
+                                }
+                            }
+                            else
+                            {
+                                var rowArr = new object[colCount];
+                                rowArr[0] = dv;
+                                if (!IsNullOrEmpty(dv)) result.Rows.Add(rowArr);
+                            }
+                        }
+                        finally
+                        {
+                            ReleaseCom(dRng);
+                            ReleaseCom(dTL);
+                            ReleaseCom(dBR);
+                        }
+
+                        progressCallback?.Invoke(
+                            result.Rows.Count,
+                            result.Rows.Count,
+                            FormatDone(result.Rows.Count, profile.CompletionLabel, profile.ProgressUnit));
+
+                        return result;
+                    }
+                    finally
+                    {
+                        ReleaseCom(usedRange);
+                        ReleaseCom(ws);
+                        SafeQuitExcel(app, wb); // ReadSheet always owns hidden instance
+                    }
+                }
+            });
+        }
+
+        // =========================
+        // PUBLIC: WriteDictionaryToWorksheet
+        // =========================
         internal static string WriteDictionaryToWorksheet(
-            IDictionary<string, List<object>> data,
-            IList<string> headers,
-            IList<string> columnOrder,
-            Excel.Workbook wb,
-            string worksheetName,
-            int startRow,
-            int startColumn,
-            string startAddress,
-            bool saveAfterWrite,
-            bool readOnly,
-            // ---- Optional controls ----
-            bool clearTargetBlockBeforeWrite = true,
-            bool applyKioskView = true,     // show clean view
-            bool makeFullScreen = false,    // keep normal window frame by default
-            bool maximizeWindow = false,    // do NOT maximize by default
-            bool bringToFront = true        // bring Excel to foreground after write
-        )
+    IDictionary<string, List<object>> data,
+    IList<string> headers,
+    IList<string> columnOrder,
+    dynamic wb,                 // EXISTING workbook instance (reuse)
+    string worksheetName,
+    int startRow,
+    int startColumn,
+    string startAddress,
+    bool saveAfterWrite,
+    bool readOnly,
+    bool clearTargetBlockBeforeWrite = true,
+    bool applyKioskView = true,
+    bool makeFullScreen = false)
         {
             if (data == null || data.Count == 0) return "Dictionary is empty.";
             if (wb == null) return "Workbook is null.";
             if (string.IsNullOrWhiteSpace(worksheetName)) worksheetName = "Sheet1";
 
-            Excel.Worksheet ws = null;
-            Excel.Range topLeft = null, bottomRight = null, fullBlock = null;
-            Excel.Range headerRight = null, headerRow = null;
-            Excel.Range dataRange = null;
-            Excel.Application excelApp = null;
-
-            try
+            return RunSta(() =>
             {
-                // Resolve start address if provided
-                if (!string.IsNullOrWhiteSpace(startAddress) &&
-                    TryParseA1Address(startAddress, out int r, out int c))
+                lock (_excelLock)
                 {
-                    startRow = r;
-                    startColumn = c;
-                }
+                    if (!string.IsNullOrWhiteSpace(startAddress) &&
+                        TryParseA1Address(startAddress, out int rr, out int cc))
+                    {
+                        startRow = rr;
+                        startColumn = cc;
+                    }
 
-                ws = GetOrCreateWorksheet(wb, worksheetName);
-                if (ws == null) return "Failed to access worksheet.";
+                    startRow = Math.Max(1, startRow);
+                    startColumn = Math.Max(1, startColumn);
 
-                // Build column keys respecting explicit order first
-                var columnKeys = new List<string>();
-                if (columnOrder != null && columnOrder.Count > 0)
-                    columnKeys.AddRange(columnOrder);
-                foreach (var k in data.Keys)
-                    if (!columnKeys.Contains(k)) columnKeys.Add(k);
+                    dynamic app = null;
+                    dynamic ws = null;
 
-                int colCount = columnKeys.Count;
-                if (colCount == 0) return "Dictionary is empty.";
+                    dynamic topLeft = null;
+                    dynamic bottomRight = null;
+                    dynamic fullBlock = null;
+                    dynamic headerRow = null;
+                    dynamic dataRange = null;
 
-                // Max rows among branches
-                int maxRows = 0;
-                foreach (var k in columnKeys)
-                    if (data.TryGetValue(k, out var lst) && lst != null && lst.Count > maxRows)
-                        maxRows = lst.Count;
-
-                // Total rows = header (1) + data
-                int totalRows = Math.Max(1, maxRows + 1);
-
-                // Prepare 2D array [rows, cols]
-                var values = new object[totalRows, colCount];
-
-                for (int c2 = 0; c2 < colCount; c2++)
-                {
-                    string key = columnKeys[c2] ?? string.Empty;
-                    string headerLabel = (headers != null && c2 < headers.Count && !string.IsNullOrWhiteSpace(headers[c2]))
-                        ? headers[c2]
-                        : key;
-
-                    values[0, c2] = headerLabel ?? string.Empty;
-
-                    if (!data.TryGetValue(key, out var branch) || branch == null) continue;
-                    for (int r2 = 0; r2 < branch.Count; r2++)
-                        values[r2 + 1, c2] = branch[r2];
-                }
-
-                // Target block: exactly header + data (focus area)
-                startRow = Math.Max(1, startRow);
-                startColumn = Math.Max(1, startColumn);
-                topLeft = (Excel.Range)ws.Cells[startRow, startColumn];
-                bottomRight = (Excel.Range)ws.Cells[startRow + totalRows - 1, startColumn + colCount - 1];
-                fullBlock = ws.Range[topLeft, bottomRight];
-
-                // Optional: clear ONLY the target block
-                if (clearTargetBlockBeforeWrite)
-                {
-                    try { fullBlock.Clear(); } catch { /* ignore */ }
-                }
-
-                // Write values
-                fullBlock.Value2 = values;
-
-                // Header formatting (bold + light blue)
-                try
-                {
-                    headerRight = (Excel.Range)ws.Cells[startRow, startColumn + colCount - 1];
-                    headerRow = ws.Range[topLeft, headerRight];
-
-                    headerRow.Font.Bold = true;
-                    headerRow.Interior.Pattern = Excel.XlPattern.xlPatternSolid;
-                    headerRow.Interior.Color = System.Drawing.ColorTranslator.ToOle(
-                        System.Drawing.Color.FromArgb(221, 235, 247) // Excel light blue (#DDEBF7)
-                    );
-                }
-                finally
-                {
-                    ReleaseCom(headerRow);
-                    ReleaseCom(headerRight);
-                }
-
-                // Ensure ONLY header is formatted → clear formats on data rows
-                if (totalRows > 1)
-                {
-                    dataRange = ws.Range[ws.Cells[startRow + 1, startColumn], bottomRight];
-                    try { dataRange.ClearFormats(); } catch { /* ignore */ }
-                }
-
-                // Activate sheet; optional maximize; optional bring-to-front
-                try
-                {
-                    ws.Activate();
-
-                    if (maximizeWindow) MaximizeExcelWindow(excelApp); // opt-in
-                    try { excelApp.Goto(topLeft, true); } catch { }
-                    try { topLeft.Select(); } catch { }
-                    if (bringToFront) BringExcelToFront(excelApp);
-                }
-                catch { }
-                // Activate sheet; optional maximize; optional bring-to-front
-
-                // Kiosk view without table (keep sheet tabs; optional fullscreen)
-                if (applyKioskView)
-                {
                     try
                     {
-                        ApplyKioskViewNoTable(excelApp, ws, fullBlock, makeFullScreen);
+                        // Get Excel.Application from the existing workbook
+                        try { app = wb.Application; } catch { app = null; }
+
+                        // Get/Create sheet in THIS workbook
+                        ws = GetOrCreateWorksheet(wb, worksheetName);
+
+                        // Build column keys (explicit order first)
+                        var columnKeysLocal = new List<string>();
+                        if (columnOrder != null && columnOrder.Count > 0)
+                            columnKeysLocal.AddRange(columnOrder);
+
+                        foreach (var k in data.Keys)
+                            if (!columnKeysLocal.Contains(k)) columnKeysLocal.Add(k);
+
+                        int colCount = columnKeysLocal.Count;
+                        if (colCount == 0) return "Dictionary is empty.";
+
+                        // Max rows among columns
+                        int maxRows = 0;
+                        foreach (var k in columnKeysLocal)
+                        {
+                            if (data.TryGetValue(k, out var lst) && lst != null && lst.Count > maxRows)
+                                maxRows = lst.Count;
+                        }
+
+                        int totalRows = Math.Max(1, maxRows + 1); // header + data
+
+                        // Prepare 2D array for fast Value2 write
+                        var values = new object[totalRows, colCount];
+
+                        for (int c2 = 0; c2 < colCount; c2++)
+                        {
+                            string key = columnKeysLocal[c2] ?? string.Empty;
+
+                            string headerLabel = (headers != null &&
+                                                  c2 < headers.Count &&
+                                                  !string.IsNullOrWhiteSpace(headers[c2]))
+                                ? headers[c2]
+                                : key;
+
+                            values[0, c2] = headerLabel ?? string.Empty;
+
+                            if (!data.TryGetValue(key, out var branch) || branch == null) continue;
+                            for (int r2 = 0; r2 < branch.Count; r2++)
+                                values[r2 + 1, c2] = branch[r2];
+                        }
+
+                        // Target range
+                        topLeft = ws.Cells[startRow, startColumn];
+                        bottomRight = ws.Cells[startRow + totalRows - 1, startColumn + colCount - 1];
+                        fullBlock = ws.Range(topLeft, bottomRight);
+
+                        if (clearTargetBlockBeforeWrite)
+                        {
+                            try { fullBlock.Clear(); } catch { }
+                        }
+
+                        fullBlock.Value2 = values;
+
+                        // Header formatting (row 1 of block)
+                        try
+                        {
+                            dynamic headerRight = null;
+                            try
+                            {
+                                headerRight = ws.Cells[startRow, startColumn + colCount - 1];
+                                headerRow = ws.Range(topLeft, headerRight);
+
+                                try { headerRow.Font.Bold = true; } catch { }
+                                try { headerRow.Interior.Pattern = 1; } catch { }       // xlPatternSolid
+                                try { headerRow.Interior.Color = 16247773; } catch { }  // light blue
+                            }
+                            finally
+                            {
+                                ReleaseCom(headerRight);
+                            }
+                        }
+                        catch { }
+
+                        // Clear formats for data rows only
+                        if (totalRows > 1)
+                        {
+                            try
+                            {
+                                dataRange = ws.Range(ws.Cells[startRow + 1, startColumn], bottomRight);
+                                dataRange.ClearFormats();
+                            }
+                            catch { }
+                        }
+
+                        // Optional kiosk focus (only if we can access app)
+                        if (applyKioskView && app != null)
+                        {
+                            try
+                            {
+                                ws.Activate();
+                                ApplyKioskViewNoTable(app, ws, fullBlock, makeFullScreen, 120);
+                            }
+                            catch { }
+                        }
+
+                        // Save
+                        if (saveAfterWrite && !readOnly)
+                        {
+                            try { wb.Save(); } catch { }
+                        }
+
+                        string startLabel = !string.IsNullOrWhiteSpace(startAddress)
+                            ? startAddress.ToUpperInvariant()
+                            : ColumnNumberToLetters(startColumn) + startRow.ToString(CultureInfo.InvariantCulture);
+
+                        return string.Format(CultureInfo.InvariantCulture,
+                            "Wrote {0} columns × {1} rows to '{2}' at {3} (reused workbook).",
+                            colCount, totalRows, worksheetName, startLabel);
                     }
-                    catch { /* degrade gracefully */ }
+                    catch (Exception ex)
+                    {
+                        return "Failed: " + ex.Message;
+                    }
+                    finally
+                    {
+                        ReleaseCom(dataRange);
+                        ReleaseCom(headerRow);
+                        ReleaseCom(fullBlock);
+                        ReleaseCom(topLeft);
+                        ReleaseCom(bottomRight);
+                        ReleaseCom(ws);
+
+                        // DO NOT quit Excel here (we don't own wb/app).
+                        ReleaseCom(app);
+
+                        try
+                        {
+                            GC.Collect();
+                            GC.WaitForPendingFinalizers();
+                            GC.Collect();
+                            GC.WaitForPendingFinalizers();
+                        }
+                        catch { }
+                    }
                 }
-
-                if (saveAfterWrite && !readOnly)
-                {
-                    try { wb.Save(); } catch { }
-                }
-
-                string wsName = ws?.Name ?? worksheetName;
-                string startLabel = !string.IsNullOrWhiteSpace(startAddress)
-                    ? startAddress.ToUpperInvariant()
-                    : ColumnNumberToLetters(startColumn) + Math.Max(1, startRow).ToString(CultureInfo.InvariantCulture);
-
-                return string.Format(CultureInfo.InvariantCulture,
-                    "Wrote {0} columns × {1} rows to '{2}' starting at {3}; header bolded (kiosk: {4}, fullscreen: {5}, maximized: {6}, front: {7}).",
-                    colCount,
-                    totalRows,
-                    wsName,
-                    startLabel,
-                    applyKioskView ? "on" : "off",
-                    makeFullScreen ? "on" : "off",
-                    maximizeWindow ? "on" : "off",
-                    bringToFront ? "on" : "off");
-            }
-            catch (Exception ex)
-            {
-                return "Failed: " + ex.Message;
-            }
-            finally
-            {
-                ReleaseCom(dataRange);
-                ReleaseCom(fullBlock);
-                ReleaseCom(topLeft);
-                ReleaseCom(bottomRight);
-                ReleaseCom(ws);
-            }
+            });
         }
-
-        #endregion
     }
 }

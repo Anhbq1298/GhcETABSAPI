@@ -167,16 +167,25 @@ namespace MGT
             }
 
             // Attach/open workbook
-            Excel.Application app;
-            Excel.Workbook wb;
-            ExcelHelpers.AttachOrOpenWorkbook(out app, out wb, workbookPath, visible: visible);
+            dynamic xlApp = null;
+            dynamic xlWb = null;
 
+            ExcelHelpers.AttachOrOpenWorkbook(
+                out xlApp,
+                out xlWb,
+                absolutePathFromRhino: workbookPath,
+                visible: true,
+                readOnly: false,
+                maximizeWindow: true,
+                bringToFront: true,
+                tryAttachToRunningExcel: false
+            );
             // Write
             message = ExcelHelpers.WriteDictionaryToWorksheet(
                 dictionary,
                 headers,
                 columnKeys,
-                wb,                 // reuse existing workbook
+                xlWb,                 // reuse existing workbook
                 sheetName,          // create if missing
                 startRow,
                 startColumn,

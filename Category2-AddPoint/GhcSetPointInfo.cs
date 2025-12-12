@@ -136,13 +136,8 @@ namespace MGT
                 if (sap == null)
                     throw new InvalidOperationException("sapModel is null. Wire it from the Attach component.");
 
-                string fullPath = ExcelHelpers.ProjectRelative(path);
-                if (string.IsNullOrWhiteSpace(fullPath))
-                    throw new InvalidOperationException("excelPath is empty.");
-                if (!File.Exists(fullPath))
-                    throw new FileNotFoundException("Excel workbook not found.", fullPath);
-                if (string.IsNullOrWhiteSpace(sheet))
-                    sheet = DefaultSheet;
+                string fullPath = path;
+
 
                 // --- Progress UI: Excel + Assignment ---
                 UiHelpers.ShowDualProgressBar(
@@ -550,15 +545,24 @@ namespace MGT
                 // 1) Scan ETABS for all points (name + current XYZ)
                 var points = ScanEtabsPoints(sap); // returns list sorted by name ASC
                 nRowsWritten = points.Count;
-
+                                
                 // 2) Attach/Open Excel
                 Excel.Application app = null;
                 Excel.Workbook wb = null;
-                if (!ExcelHelpers.AttachOrOpenWorkbook(out app, out wb, workbookFullPath, visible: true, readOnly: false) || app == null || wb == null)
-                {
-                    message = "Failed to attach/open Excel workbook.";
-                    return -1;
-                }
+
+                dynamic xlApp = null;
+                dynamic xlWb = null;
+
+                ExcelHelpers.AttachOrOpenWorkbook(
+                    out xlApp,
+                    out xlWb,
+                    absolutePathFromRhino: workbookFullPath,
+                    visible: true,
+                    readOnly: false,
+                    maximizeWindow: true,
+                    bringToFront: true,
+                    tryAttachToRunningExcel: false
+                );
 
                 Excel.Worksheet ws = null;
                 try

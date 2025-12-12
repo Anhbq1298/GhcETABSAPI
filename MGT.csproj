@@ -29,17 +29,6 @@
 	<!-- IMPORTANT:
        - Include="office" is the assembly name for office.dll (Microsoft Office Core).
        - Private=true forces copy to output so GH can resolve at runtime. -->
-	<ItemGroup>
-		<Reference Include="office">
-			<EmbedInteropTypes>false</EmbedInteropTypes>
-			<Private>true</Private>
-		</Reference>
-
-		<Reference Include="Microsoft.Office.Interop.Excel">
-			<EmbedInteropTypes>false</EmbedInteropTypes>
-			<Private>true</Private>
-		</Reference>
-	</ItemGroup>
 
 	<!-- Grasshopper SDK for compile-time only (Rhino provides runtime) -->
 	<PropertyGroup>
@@ -48,25 +37,20 @@
 
 	<ItemGroup>
 		<PackageReference Include="Grasshopper" Version="8.0.23304.9001" ExcludeAssets="runtime" />
-		<PackageReference Include="Microsoft.Office.Interop.Excel" Version="$(OfficeInteropVersion)" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Reference Include="ETABSv1">
+	    <HintPath>ETABSv1.dll</HintPath>
+	  </Reference>
+	  <Reference Include="Microsoft.Office.Interop.Excel">
+	    <HintPath>Microsoft.Office.Interop.Excel.dll</HintPath>
+	  </Reference>
 	</ItemGroup>
 
 	<!-- Explicitly pull in office.dll so deployments do not miss the PIA dependency -->
-	<ItemGroup>
-		<Reference Include="office">
-			<HintPath>$(PkgMicrosoft_Office_Interop_Excel)\lib\net8.0\office.dll</HintPath>
-			<Private>true</Private>
-		</Reference>
-	</ItemGroup>
 
 	<!-- ETABS COM Interop: DO NOT embed; copy DLL next to the .gha -->
-	<ItemGroup>
-		<Reference Include="ETABSv1">
-			<HintPath>ETABSv1.dll</HintPath>
-			<EmbedInteropTypes>false</EmbedInteropTypes>
-			<Private>true</Private>
-		</Reference>
-	</ItemGroup>
 
 	<!-- Resources -->
 	<ItemGroup>

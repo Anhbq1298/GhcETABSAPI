@@ -155,7 +155,7 @@ namespace MGT
                     throw new InvalidOperationException("sapModel is null. Wire it from the Attach component.");
                 }
 
-                string fullPath = ExcelHelpers.ProjectRelative(excelPath);
+                string fullPath = excelPath;
                 if (string.IsNullOrWhiteSpace(fullPath))
                 {
                     throw new InvalidOperationException("excelPath is empty.");
