@@ -577,10 +577,10 @@ namespace MGT
         {
             if (excel == null) return;
 
-            bool prevAlerts = false;
-            try { prevAlerts = excel.DisplayAlerts; excel.DisplayAlerts = false; } catch { }
-            try { excel.ScreenUpdating = false; } catch { }
-            try { excel.UserControl = false; } catch { }
+            bool prevAlerts = TryGetApplicationBool(excel, "DisplayAlerts") ?? false;
+            TrySetApplicationBool(excel, "DisplayAlerts", false);
+            TrySetApplicationBool(excel, "ScreenUpdating", false);
+            TrySetApplicationBool(excel, "UserControl", false);
 
             Excel.Workbooks books = null;
             try
@@ -930,11 +930,11 @@ namespace MGT
             UiState state = new UiState();
             try
             {
-                state.DisplayFullScreen = app.DisplayFullScreen;
-                state.DisplayFormulaBar = app.DisplayFormulaBar;
-                state.DisplayStatusBar = app.DisplayStatusBar;
-                state.ScreenUpdating = app.ScreenUpdating;
-                state.EnableEvents = app.EnableEvents;
+                state.DisplayFullScreen = TryGetApplicationBool(app, "DisplayFullScreen");
+                state.DisplayFormulaBar = TryGetApplicationBool(app, "DisplayFormulaBar");
+                state.DisplayStatusBar = TryGetApplicationBool(app, "DisplayStatusBar");
+                state.ScreenUpdating = TryGetApplicationBool(app, "ScreenUpdating");
+                state.EnableEvents = TryGetApplicationBool(app, "EnableEvents");
 
                 var win = TryGetActiveWindow(app);
                 if (win != null)
@@ -952,14 +952,14 @@ namespace MGT
             // Hide chrome + zoom to selection
             try
             {
-                app.ScreenUpdating = true;
-                app.EnableEvents = false;
+                TrySetApplicationBool(app, "ScreenUpdating", true);
+                TrySetApplicationBool(app, "EnableEvents", false);
 
                 // Hide Ribbon (Excel4 macro)
                 try { app.ExecuteExcel4Macro(@"SHOW.TOOLBAR(""Ribbon"",False)"); } catch { }
 
-                app.DisplayFormulaBar = false;
-                app.DisplayStatusBar = false;
+                TrySetApplicationBool(app, "DisplayFormulaBar", false);
+                TrySetApplicationBool(app, "DisplayStatusBar", false);
 
                 var win = TryGetActiveWindow(app);
                 if (win != null)
@@ -979,12 +979,12 @@ namespace MGT
                 }
 
                 // Do NOT force FullScreen unless requested
-                app.DisplayFullScreen = makeFullScreen;
+                TrySetApplicationBool(app, "DisplayFullScreen", makeFullScreen);
             }
             catch { }
             finally
             {
-                try { app.EnableEvents = true; } catch { }
+                TrySetApplicationBool(app, "EnableEvents", true);
             }
 
             // Scroll to top-left of range
@@ -1009,11 +1009,11 @@ namespace MGT
         {
             if (app == null || state == null) return;
 
-            try { app.ScreenUpdating = state.ScreenUpdating ?? true; } catch { }
-            try { app.EnableEvents = state.EnableEvents ?? true; } catch { }
-            try { app.DisplayFullScreen = state.DisplayFullScreen ?? false; } catch { }
-            try { app.DisplayFormulaBar = state.DisplayFormulaBar ?? true; } catch { }
-            try { app.DisplayStatusBar = state.DisplayStatusBar ?? true; } catch { }
+            TrySetApplicationBool(app, "ScreenUpdating", state.ScreenUpdating ?? true);
+            TrySetApplicationBool(app, "EnableEvents", state.EnableEvents ?? true);
+            TrySetApplicationBool(app, "DisplayFullScreen", state.DisplayFullScreen ?? false);
+            TrySetApplicationBool(app, "DisplayFormulaBar", state.DisplayFormulaBar ?? true);
+            TrySetApplicationBool(app, "DisplayStatusBar", state.DisplayStatusBar ?? true);
 
             // Show Ribbon back
             try { app.ExecuteExcel4Macro(@"SHOW.TOOLBAR(""Ribbon"",True)"); } catch { }
